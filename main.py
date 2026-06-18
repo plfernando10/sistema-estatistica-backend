@@ -151,23 +151,19 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             fig.savefig(b_png, format="png"); fig.savefig(b_pdf, format="pdf"); plt.close(fig)
             return {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": r2, "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8')}
 
-        # === TUKEY ===
+        # === TUKEY E DUNCAN E DUNNETT ... ===
         if "tukey_" in tipo_teste:
             q_crit = qsturng(0.95, n_niveis, gl_res); dms = q_crit * ep
             return {"status": "sucesso", "tipo": "tukey", "q": round(q_crit, 4), "dms": round(dms, 4), "tabela": [{"Nível": str(n), "Média": round(v, 2)} for n, v in medias.items()]}
         
-        # === DUNCAN ===
         if "duncan_" in tipo_teste:
-            # Duncan usa um alpha ajustado = 1 - (1-alpha)^(p-1) para gerar os alcances studentizados
             rp_duncan = {p: round(qsturng((0.95)**(p-1), p, gl_res) * ep, 4) for p in range(2, n_niveis + 1)}
             return {"status": "sucesso", "tipo": "duncan", "alcances": rp_duncan, "tabela": [{"Nível": str(n), "Média": round(v, 2)} for n, v in medias.items()]}
 
-        # === DUNNETT ===
         if "dunnett_" in tipo_teste:
             if not testemunha or testemunha not in medias.index:
                 return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada. Níveis válidos: {list(medias.index)}"}
             media_test = medias[testemunha]
-            # Usamos T com Correção de Bonferroni como aproximação robusta de Dunnett
             t_crit = stats.t.ppf(1 - (0.05 / (2 * (n_niveis - 1))), gl_res)
             dms_dunnett = t_crit * ep * np.sqrt(2)
             resultados = []
@@ -179,3 +175,39 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             return {"status": "sucesso", "tipo": "dunnett", "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": resultados}
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+# ================= MÓDULO 3: PARCELAS SUBDIVIDIDAS =================
+@app.post("/api/analise/parcelas")
+async def analisar_parcelas(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        try: df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
+        except: df = pd.read_csv(io.BytesIO(content), sep=',', decimal='.')
+        cols = list(df.columns)
+        df.rename(columns={cols[0]: 'A', cols[1]: 'B', cols[2]: 'Bloco', cols[3]: 'Valor'}, inplace=True)
+        df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace(',', '.'), errors='coerce')
+        nA, nB, nR = len(df['A'].unique()), len(df['B'].unique()), len(df['Bloco'].unique())
+        mg, n_total = df['Valor'].mean(), len(df)
+        
+        sq_tot = ((df['Valor'] - mg)**2).sum()
+        sq_bloc = (nA * nB) * ((df.groupby('Bloco')['Valor'].mean() - mg)**2).sum()
+        sq_a = (nB * nR) * ((df.groupby('A')['Valor'].mean() - mg)**2).sum()
+        sq_a_bloc = nB * ((df.groupby(['A', 'Bloco'])['Valor'].mean() - mg)**2).sum()
+        sq_erro_a = max(0, sq_a_bloc - sq_a - sq_bloc)
+        sq_b = (nA * nR) * ((df.groupby('B')['Valor'].mean() - mg)**2).sum()
+        sq_inter = nR * ((df.groupby(['A', 'B'])['Valor'].mean() - mg)**2).sum() - sq_a - sq_b
+        sq_erro_b = max(0, sq_tot - sq_bloc - sq_a - sq_erro_a - sq_b - sq_inter)
+        
+        gl_a, gl_bloc, gl_erro_a = nA - 1, nR - 1, (nA - 1) * (nR - 1)
+        gl_b, gl_inter, gl_tot = nB - 1, (nA - 1) * (nB - 1), n_total - 1
+        gl_erro_b = gl_tot - (gl_a + gl_bloc + gl_erro_a + gl_b + gl_inter)
+        
+        qm_a, qm_bloc, qm_erro_a = sq_a / gl_a, sq_bloc / gl_bloc, sq_erro_a / gl_erro_a if gl_erro_a > 0 else 0
+        qm_b, qm_inter, qm_erro_b = sq_b / gl_b, sq_inter / gl_inter, sq_erro_b / gl_erro_b if gl_erro_b > 0 else 0
+        f_a, f_bloc = qm_a / qm_erro_a if qm_erro_a > 0 else 0, qm_bloc / qm_erro_a if qm_erro_a > 0 else 0
+        f_b, f_inter = qm_b / qm_erro_b if qm_erro_b > 0 else 0, qm_inter / qm_erro_b if qm_erro_b > 0 else 0
+        
+        anova = [
+            {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": round(f_a,2), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_a, gl_a, gl_erro_a), gl_a, gl_erro_a)},
+            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_bloc, gl_bloc, gl_erro_a), gl_bloc, gl_erro_a)},
+            {"FV": "Erro A (Parcela)", "GL": gl_erro_a, "SQ": round(sq_erro_a,2), "QM": round(qm_erro_a,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
