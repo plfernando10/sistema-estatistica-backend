@@ -26,7 +26,8 @@ def classificar_cv(cv):
     else: return "Ruim"
 
 def calcular_f_tab(gl_num, gl_den, alpha=0.95):
-    if gl_num > 0 and gl_den > 0: return round(stats.f.ppf(alpha, gl_num, gl_den), 2)
+    if gl_num > 0 and gl_den > 0: 
+        return round(stats.f.ppf(alpha, gl_num, gl_den), 2)
     return "-"
 
 def aplicar_letras(medias_series, dms_val=None, duncan_dict=None):
@@ -75,6 +76,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
         n_total = len(df)
         nT = len(df['Trat'].unique())
         rep_media = n_total / nT
+        gl_tot = n_total - 1
         
         if tipo_delineamento == "dql":
             sq_trat = nT * ((df.groupby('Trat')['Valor'].mean() - mg)**2).sum()
@@ -82,52 +84,64 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             sq_col = nT * ((df.groupby('Coluna')['Valor'].mean() - mg)**2).sum()
             sq_res = max(0, sq_tot - sq_trat - sq_linha - sq_col)
             gl_trat, gl_linha, gl_col = nT - 1, nT - 1, nT - 1
-            gl_res, gl_tot = (nT - 1) * (nT - 2), n_total - 1
+            gl_res = (nT - 1) * (nT - 2)
             qm_trat, qm_linha, qm_col = sq_trat / gl_trat, sq_linha / gl_linha, sq_col / gl_col
             qm_res = sq_res / gl_res if gl_res > 0 else 0
+            
             f_trat = qm_trat/qm_res if qm_res>0 else 0
+            f_linha = qm_linha/qm_res if qm_res>0 else 0
+            f_col = qm_col/qm_res if qm_res>0 else 0
+            
             p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
+            p_linha = 1 - stats.f.cdf(f_linha, gl_linha, gl_res)
+            p_col = 1 - stats.f.cdf(f_col, gl_col, gl_res)
             
             anova = [
                 {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                {"FV": "Linhas", "GL": gl_linha, "SQ": round(sq_linha,2), "QM": round(qm_linha,2), "F Calc": round(qm_linha/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_linha, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(qm_linha/qm_res if qm_res>0 else 0, gl_linha, gl_res), gl_linha, gl_res)},
-                {"FV": "Colunas", "GL": gl_col, "SQ": round(sq_col,2), "QM": round(qm_col,2), "F Calc": round(qm_col/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_col, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(qm_col/qm_res if qm_res>0 else 0, gl_col, gl_res), gl_col, gl_res)},
-                {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"}
+                {"FV": "Linhas", "GL": gl_linha, "SQ": round(sq_linha,2), "QM": round(qm_linha,2), "F Calc": round(f_linha,2), "F Tab": calcular_f_tab(gl_linha, gl_res), "Sig": determinar_sig_texto(p_linha, gl_linha, gl_res)},
+                {"FV": "Colunas", "GL": gl_col, "SQ": round(sq_col,2), "QM": round(qm_col,2), "F Calc": round(f_col,2), "F Tab": calcular_f_tab(gl_col, gl_res), "Sig": determinar_sig_texto(p_col, gl_col, gl_res)},
+                {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+                {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
         else:
             nR = len(df['Bloco'].unique()) if tipo_delineamento == "dbc" else 1
             sq_trat = rep_media * ((df.groupby('Trat')['Valor'].mean() - mg)**2).sum()
+            gl_trat = nT - 1
             
             if tipo_delineamento == "dbc":
                 sq_bloc = nT * ((df.groupby('Bloco')['Valor'].mean() - mg)**2).sum()
                 sq_res = max(0, sq_tot - sq_trat - sq_bloc)
-                gl_trat, gl_bloc, gl_tot = nT - 1, nR - 1, n_total - 1
+                gl_bloc = nR - 1
                 gl_res = gl_tot - gl_trat - gl_bloc
-                qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
-                f_trat = qm_trat/qm_res if qm_res>0 else 0
+                qm_trat, qm_bloc = sq_trat/gl_trat, sq_bloc/gl_bloc
+                qm_res = sq_res/gl_res if gl_res>0 else 0
+                f_trat, f_bloc = qm_trat/qm_res if qm_res>0 else 0, qm_bloc/qm_res if qm_res>0 else 0
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
+                p_bloc = 1 - stats.f.cdf(f_bloc, gl_bloc, gl_res)
                 anova = [
                     {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0, gl_bloc, gl_res), gl_bloc, gl_res)},
-                    {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"}
+                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
+                    {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+                    {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
             else: 
                 sq_res = max(0, sq_tot - sq_trat)
-                gl_trat, gl_tot = nT - 1, n_total - 1
                 gl_res = gl_tot - gl_trat
-                qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
+                qm_trat = sq_trat/gl_trat
+                qm_res = sq_res/gl_res if gl_res>0 else 0
                 f_trat = qm_trat/qm_res if qm_res>0 else 0
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
                 anova = [
                     {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                    {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"}
+                    {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+                    {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
         
         if tipo_teste == "anova":
             cv_val = round((np.sqrt(qm_res)/mg)*100, 2) if qm_res > 0 else 0
             return {"status": "sucesso", "cv": f"{cv_val}% ({classificar_cv(cv_val)})", "anova": anova}
 
-        # === POST-HOC (MÓDULO 1) ===
+        # === POST-HOC MÓDULO 1 ===
         alpha = 0.01 if p_trat < 0.01 else 0.05
         alpha_txt = "1%" if p_trat < 0.01 else "5%"
         ep = np.sqrt(qm_res / rep_media)
@@ -135,7 +149,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
         if "regr" in tipo_teste:
             if pd.to_numeric(df['Trat'], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para tratamentos em texto, utilize testes de médias."}
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -181,7 +195,8 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ================= MÓDULO 2: FATORIAL (A x B) =================
+
+# ================= MÓDULO 2: FATORIAL DUPLO (COM TRATAMENTOS E TOTAL) =================
 @app.post("/api/analise/fatorial")
 async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form("")):
     try:
@@ -199,25 +214,35 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         sq_a = (nB*nR) * ((df.groupby('A')['Valor'].mean() - mg)**2).sum()
         sq_b = (nA*nR) * ((df.groupby('B')['Valor'].mean() - mg)**2).sum()
         sq_inter = nR * ((df.groupby(['A', 'B'])['Valor'].mean() - mg)**2).sum() - sq_a - sq_b
-        sq_res = max(0, sq_tot - sq_bloc - sq_a - sq_b - sq_inter)
         
+        # Agrupamento de Tratamentos (A + B + AxB)
+        sq_trat = sq_a + sq_b + sq_inter
+        gl_trat = (nA * nB) - 1
+        qm_trat = sq_trat / gl_trat
+        
+        sq_res = max(0, sq_tot - sq_bloc - sq_a - sq_b - sq_inter)
         gl_a, gl_b, gl_inter, gl_bloc, gl_tot = nA-1, nB-1, (nA-1)*(nB-1), nR-1, (nA*nB*nR)-1
         gl_res = gl_tot - gl_a - gl_b - gl_inter - gl_bloc
         qm_res = sq_res/gl_res if gl_res > 0 else 0
+        
+        f_trat = qm_trat / qm_res if qm_res > 0 else 0
+        p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
 
         if tipo_teste == "anova":
             cv_val = round((np.sqrt(qm_res)/mg)*100, 2) if qm_res > 0 else 0
             return {
                 "status": "sucesso", "cv": f"{cv_val}% ({classificar_cv(cv_val)})", 
                 "anova": [
-                    {"FV": "Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(sq_a/gl_a,2), "F Calc": round((sq_a/gl_a)/qm_res,2), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_a/gl_a)/qm_res, gl_a, gl_res), gl_a, gl_res)},
-                    {"FV": "Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(sq_b/gl_b,2), "F Calc": round((sq_b/gl_b)/qm_res,2), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_b/gl_b)/qm_res, gl_b, gl_res), gl_b, gl_res)},
-                    {"FV": "Interação", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": round((sq_inter/gl_inter)/qm_res,2), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_inter/gl_inter)/qm_res, gl_inter, gl_res), gl_inter, gl_res)},
-                    {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"}
+                    {"FV": "Tratamentos (Agrupados)", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
+                    {"FV": "  Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(sq_a/gl_a,2), "F Calc": round((sq_a/gl_a)/qm_res,2), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_a/gl_a)/qm_res, gl_a, gl_res), gl_a, gl_res)},
+                    {"FV": "  Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(sq_b/gl_b,2), "F Calc": round((sq_b/gl_b)/qm_res,2), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_b/gl_b)/qm_res, gl_b, gl_res), gl_b, gl_res)},
+                    {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": round((sq_inter/gl_inter)/qm_res,2), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_inter/gl_inter)/qm_res, gl_inter, gl_res), gl_inter, gl_res)},
+                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round((sq_bloc/gl_bloc)/qm_res,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_bloc/gl_bloc)/qm_res, gl_bloc, gl_res), gl_bloc, gl_res)},
+                    {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+                    {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
             }
         
-        # === POST-HOC MÓDULO 2 ===
         fator = 'A' if tipo_teste.endswith("_a") else 'B'
         n_niveis = nA if fator == 'A' else nB
         ep = np.sqrt(qm_res/(nB*nR)) if fator == 'A' else np.sqrt(qm_res/(nA*nR))
@@ -248,7 +273,8 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
 
             sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
-            gl_desvio = gl_trat - gl_reg
+            gl_fator_real = (nA - 1) if fator == 'A' else (nB - 1)
+            gl_desvio = gl_fator_real - gl_reg
             qm_reg, qm_desvio = sq_reg_raw / gl_reg, sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
             f_reg, f_desvio = qm_reg / qm_res if qm_res > 0 else 0, qm_desvio / qm_res if qm_res > 0 else 0
 
@@ -270,7 +296,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett_" in tipo_teste:
-            if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
+            if not延 testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
             media_test = medias[testemunha]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (n_niveis - 1))), gl_res) * ep * np.sqrt(2)
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
@@ -278,7 +304,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ================= MÓDULO 3: PARCELAS SUBDIVIDIDAS =================
+# ================= MÓDULO 3: PARCELAS SUBDIVIDIDAS (COM PARCELA E TOTAL) =================
 @app.post("/api/analise/parcelas")
 async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form("")):
     try:
@@ -297,6 +323,11 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         sq_a = (nB * nR) * ((df.groupby('A')['Valor'].mean() - mg)**2).sum()
         sq_a_bloc = nB * ((df.groupby(['A', 'Bloco'])['Valor'].mean() - mg)**2).sum()
         sq_erro_a = max(0, sq_a_bloc - sq_a - sq_bloc)
+        
+        # Subtotal de Variação das Parcelas (Fator A + Blocos + Erro A)
+        sq_parcela_total = sq_a + sq_bloc + sq_erro_a
+        gl_parcela_total = (nA * nR) - 1
+        
         sq_b = (nA * nR) * ((df.groupby('B')['Valor'].mean() - mg)**2).sum()
         sq_inter = nR * ((df.groupby(['A', 'B'])['Valor'].mean() - mg)**2).sum() - sq_a - sq_b
         sq_erro_b = max(0, sq_tot - sq_bloc - sq_a - sq_erro_a - sq_b - sq_inter)
@@ -305,10 +336,17 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         gl_b, gl_inter, gl_tot = nB - 1, (nA - 1) * (nB - 1), n_total - 1
         gl_erro_b = gl_tot - (gl_a + gl_bloc + gl_erro_a + gl_b + gl_inter)
         
-        qm_a, qm_bloc, qm_erro_a = sq_a / gl_a, sq_bloc / gl_bloc, sq_erro_a / gl_erro_a if gl_erro_a > 0 else 0
-        qm_b, qm_inter, qm_erro_b = sq_b / gl_b, sq_inter / gl_inter, sq_erro_b / gl_erro_b if gl_erro_b > 0 else 0
-        f_a, f_bloc = qm_a / qm_erro_a if qm_erro_a > 0 else 0, qm_bloc / qm_erro_a if qm_erro_a > 0 else 0
-        f_b, f_inter = qm_b / qm_erro_b if qm_erro_b > 0 else 0, qm_inter / qm_erro_b if qm_erro_b > 0 else 0
+        qm_a = sq_a / gl_a
+        qm_bloc = sq_bloc / gl_bloc
+        qm_erro_a = sq_erro_a / gl_erro_a if gl_erro_a > 0 else 0
+        qm_b = sq_b / gl_b
+        qm_inter = sq_inter / gl_inter
+        qm_erro_b = sq_erro_b / gl_erro_b if gl_erro_b > 0 else 0
+        
+        f_a = qm_a / qm_erro_a if qm_erro_a > 0 else 0
+        f_bloc = qm_bloc / qm_erro_a if qm_erro_a > 0 else 0
+        f_b = qm_b / qm_erro_b if qm_erro_b > 0 else 0
+        f_inter = qm_inter / qm_erro_b if qm_erro_b > 0 else 0
         
         if tipo_teste == "anova":
             cv_a_val = round((np.sqrt(qm_erro_a)/mg)*100, 2) if qm_erro_a > 0 else 0
@@ -317,6 +355,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
                 {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": round(f_a,2), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_a, gl_a, gl_erro_a), gl_a, gl_erro_a)},
                 {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_bloc, gl_bloc, gl_erro_a), gl_bloc, gl_erro_a)},
                 {"FV": "Erro A (Parcela)", "GL": gl_erro_a, "SQ": round(sq_erro_a,2), "QM": round(qm_erro_a,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+                {"FV": "Parcelas (Subtotal)", "GL": gl_parcela_total, "SQ": round(sq_parcela_total,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"},
                 {"FV": "Fator B (Subparcela)", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": round(f_b,2), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(1-stats.f.cdf(f_b, gl_b, gl_erro_b), gl_b, gl_erro_b)},
                 {"FV": "Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": round(f_inter,2), "F Tab": calcular_f_tab(gl_inter, gl_erro_b), "Sig": determinar_sig_texto(1-stats.f.cdf(f_inter, gl_inter, gl_erro_b), gl_inter, gl_erro_b)},
                 {"FV": "Erro B (Subparcela)", "GL": gl_erro_b, "SQ": round(sq_erro_b,2), "QM": round(qm_erro_b,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
@@ -342,9 +381,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
-            
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -359,10 +396,10 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
                 ax.plot(x_plot, p(x_plot), color='red', label='Quadrática', zorder=4)
                 eq, r2, gl_reg = f"y = {c[2]:.4f} {'+' if c[1]>=0 else '-'} {abs(c[1]):.4f}x {'+' if c[0]>=0 else '-'} {abs(c[0]):.4f}x²", 1 - (np.sum((y - y_pred)**2) / np.sum((y - y_mean)**2)), 2
 
-            sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2)
-            sq_trat_raw = sq_a if fator == 'A' else sq_b
+            sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
-            gl_trat = (nA - 1) if fator == 'A' else (nB - 1); gl_desvio = gl_trat - gl_reg
+            gl_fator_real = (nA - 1) if fator == 'A' else (nB - 1)
+            gl_desvio = gl_fator_real - gl_reg
             qm_reg, qm_desvio = sq_reg_raw / gl_reg, sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
             f_reg, f_desvio = qm_reg / qm_err_atual if qm_err_atual > 0 else 0, qm_desvio / qm_err_atual if qm_err_atual > 0 else 0
 
