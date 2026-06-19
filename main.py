@@ -64,7 +64,7 @@ def aplicar_letras(medias_series, dms_val=None, duncan_dict=None):
         
     return [{"Nível": str(trats[i]), "Média": round(vals[i], 2), "Letra": letras[i]} for i in range(n)]
 
-def disparar_email_laudo(destino_email, assunto, corpo_texto, laudo_texto, anexo_nome="Laudo_Estatistico.txt"):
+def disparar_email_laudo(destino_email, assunto, laudo_texto):
     remetente = os.getenv("EMAIL_REMETENTE")
     senha = os.getenv("EMAIL_SENHA")
     
@@ -76,12 +76,14 @@ def disparar_email_laudo(destino_email, assunto, corpo_texto, laudo_texto, anexo
         msg['From'] = remetente
         msg['To'] = destino_email
         msg['Subject'] = assunto
-        msg.attach(MIMEText(corpo_texto, 'plain'))
+        
+        corpo = "Olá!\n\nSegue em anexo o laudo técnico completo da sua análise estatística experimental processada no Solver.\n\nAtenciosamente,\nEquipe Solver Estatística."
+        msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
         
         part = MIMEBase('application', 'octet-stream')
         part.set_payload(laudo_texto.encode('utf-8'))
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename="{anexo_nome}"')
+        part.add_header('Content-Disposition', 'attachment; filename="Laudo_Estatistico_Solver.txt"')
         msg.attach(part)
         
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -146,12 +148,12 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 gl_bloc = nR - 1
                 gl_res = gl_tot - gl_trat - gl_bloc
                 qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
-                f_trat, f_bloc = qm_trat/qm_res if qm_res>0 else 0, sq_bloc/(nR-1)/qm_res if qm_res>0 else 0
+                f_trat, f_bloc = qm_trat/qm_res if qm_res>0 else 0, sq_bloc/gl_bloc/qm_res if qm_res>0 else 0
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
                 p_bloc = 1 - stats.f.cdf(f_bloc, gl_bloc, gl_res)
                 anova = [
                     {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
+                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
                     {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
                     {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
@@ -173,13 +175,13 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
         if tipo_teste == "anova":
             if email:
-                laudo = f"Laudo de Analise Simples - {tipo_delineamento.upper()}\n\nCV: {cv_string}\n\nQuadro ANOVA:\n"
-                for row in anova: laudo += f"{row['FV']}: GL={row['GL']}, SQ={row['SQ']}, QM={row.get('QM','-')}, F={row.get('F Calc','-')}\n"
-                disparar_email_laudo(email, "Laudo Estatistico - Solver", "Seu laudo simplificado da ANOVA segue em anexo.", laudo)
-                return {"status": "sucesso", "mensagem": "Laudo enviado para o e-mail informado!"}
+                laudo = f"LAUDO TÉCNICO - EXPERIMENTO SIMPLES ({tipo_delineamento.upper()})\n\nCV do Ensaio: {cv_string}\n\nQUADRO DA ANOVA:\n"
+                for row in anova: laudo += f"{row['FV']}: GL={row['GL']}, SQ={row['SQ']}, QM={row.get('QM','-')}, F={row.get('F Calc','-')} ({row.get('Sig','-')})\n"
+                disparar_email_laudo(email, "Laudo ANOVA Simples - Solver", laudo)
+                return {"status": "sucesso", "mensagem": "Laudo enviado com sucesso para o e-mail!"}
             return {"status": "sucesso", "cv": cv_string, "anova": anova}
 
-        # Post-hoc simples
+        # === POST-HOC MÓDULO 1 ===
         alpha = 0.01 if p_trat < 0.01 else 0.05
         alpha_txt = "1%" if p_trat < 0.01 else "5%"
         ep = np.sqrt(qm_res / rep_media)
@@ -187,7 +189,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
         if "regr" in tipo_teste:
             if pd.to_numeric(df['Trat'], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para tratamentos qualitativos, utilize os testes de médias."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -227,44 +229,21 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             
             res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
-            
-            if email:
-                laudo_reg = f"Laudo de Ajuste de Regressao\nEquacao: {eq}\nR2: {r2:.4f}\n"
-                if x_otimo: laudo_reg += f"Dose Otima: {x_otimo:.2f}\n"
-                disparar_email_laudo(email, "Laudo de Regressao - Solver", "Seu laudo de regressão estruturado segue anexo.", laudo_reg)
-                return {"status": "sucesso", "mensagem": "Laudo de Regressão enviado com sucesso!"}
             return res_dict
 
         if "tukey" in tipo_teste:
             q_crit = qsturng(1 - alpha, nT, gl_res); dms = q_crit * ep
-            tab_letras = aplicar_letras(medias, dms_val=dms)
-            if email:
-                laudo_t = f"Teste de Tukey ({alpha_txt})\n\n"
-                for r in tab_letras: laudo_t += f"{r['Nível']}: {r['Média']} {r['Letra']}\n"
-                disparar_email_laudo(email, "Teste de Tukey - Solver", "O laudo do teste de Tukey segue em anexo.", laudo_t)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
-            return {"status": "sucesso", "tipo": "tukey", "nome_teste": "Tukey", "alpha_txt": alpha_txt, "q": round(q_crit, 4), "dms": round(dms, 4), "tabela": tab_letras}
+            return {"status": "sucesso", "tipo": "tukey", "nome_teste": "Tukey", "alpha_txt": alpha_txt, "q": round(q_crit, 4), "dms": round(dms, 4), "tabela": aplicar_letras(medias, dms_val=dms)}
         
         if "duncan" in tipo_teste:
             rp_duncan = {p: round(qsturng((1 - alpha)**(p-1), p, gl_res) * ep, 4) for p in range(2, nT + 1)}
-            tab_duncan = aplicar_letras(medias, duncan_dict=rp_duncan)
-            if email:
-                laudo_d = f"Teste de Duncan ({alpha_txt})\n\n"
-                for r in tab_duncan: laudo_d += f"{r['Nível']}: {r['Média']} {r['Letra']}\n"
-                disparar_email_laudo(email, "Teste de Duncan - Solver", "O laudo do teste de Duncan segue em anexo.", laudo_d)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
-            return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": tab_duncan}
+            return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett" in tipo_teste:
             if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
             media_test = medias[testemunha]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (nT - 1))), gl_res) * ep * np.sqrt(2)
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
-            if email:
-                laudo_du = f"Teste de Dunnett (Testemunha: {testemunha})\n\n"
-                for r in res: laudo_du += f"{r['Tratamento']}: Media={r['Média']}, Dif={r['Diferença']} ({r['Sig']})\n"
-                disparar_email_laudo(email, "Teste de Dunnett - Solver", "O laudo do teste de Dunnett segue em anexo.", laudo_du)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
@@ -332,12 +311,13 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
 
         if tipo_teste == "anova":
             if email:
-                laudo = f"Laudo de Analise Fatorial Dupla\n\nCV: {cv_string}\n\nQuadro ANOVA:\n"
-                for row in anova: laudo += f"{row['FV']}: GL={row['GL']}, SQ={row['SQ']}, QM={row.get('QM','-')}\n"
-                disparar_email_laudo(email, "Laudo Fatorial - Solver", "Seu laudo de ANOVA Fatorial segue anexo.", laudo)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
+                laudo = f"LAUDO TÉCNICO - EXPERIMENTO FATORIAL DUPLO\n\nCV do Ensaio: {cv_string}\n\nQUADRO DA ANOVA:\n"
+                for row in anova: laudo += f"{row['FV']}: GL={row['GL']}, SQ={row['SQ']}\n"
+                disparar_email_laudo(email, "Laudo Fatorial - Solver", laudo)
+                return {"status": "sucesso", "mensagem": "Laudo Fatorial enviado para o e-mail!"}
             return {"status": "sucesso", "cv": cv_string, "anova": anova}
-
+        
+        # === POST-HOC MÓDULO 2 ===
         fator = 'A' if tipo_teste.endswith("_a") else 'B'
         n_niveis = nA if fator == 'A' else nB
         ep = np.sqrt(qm_res/(nB*nR)) if fator == 'A' else np.sqrt(qm_res/(nA*nR))
@@ -350,7 +330,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas."}
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             rep_fator = nB * nR if fator == 'A' else nA * nR
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
@@ -375,14 +355,17 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
             gl_fator_real = gl_a if fator == 'A' else gl_b
             gl_desvio = gl_fator_real - gl_reg
+            
             qm_reg = sq_reg_raw / gl_reg if gl_reg > 0 else 0
             qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
             f_reg = qm_reg / qm_res if qm_res > 0 else 0
             f_desvio = qm_desvio / qm_res if qm_res > 0 else 0
+            p_reg = 1 - stats.f.cdf(f_reg, gl_reg, gl_res) if gl_reg > 0 else np.nan
+            p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_res) if gl_desvio > 0 else np.nan
 
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_reg, gl_reg, gl_res), gl_reg, gl_res)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_desvio, gl_desvio, gl_res), gl_desvio, gl_res)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
@@ -391,42 +374,21 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             
             res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
-            
-            if email:
-                disparar_email_laudo(email, "Laudo de Regressao", f"Equacao: {eq}\nR2: {r2}", "")
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
             return res_dict
 
         if "tukey_" in tipo_teste:
             q_crit = qsturng(1 - alpha, n_niveis, gl_res); dms = q_crit * ep
-            tab_letras = aplicar_letras(medias, dms_val=dms)
-            if email:
-                laudo_t = f"Teste de Tukey Fator {fator}\n\n"
-                for r in tab_letras: laudo_t += f"{r['Nível']}: {r['Média']} {r['Letra']}\n"
-                disparar_email_laudo(email, "Tukey Fatorial", "Laudo anexo", laudo_t)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
-            return {"status": "sucesso", "tipo": "tukey", "nome_teste": "Tukey", "alpha_txt": alpha_txt, "q": round(q_crit, 4), "dms": round(dms, 4), "tabela": tab_letras}
+            return {"status": "sucesso", "tipo": "tukey", "nome_teste": "Tukey", "alpha_txt": alpha_txt, "q": round(q_crit, 4), "dms": round(dms, 4), "tabela": aplicar_letras(medias, dms_val=dms)}
         
         if "duncan_" in tipo_teste:
             rp_duncan = {p: round(qsturng((1 - alpha)**(p-1), p, gl_res) * ep, 4) for p in range(2, n_niveis + 1)}
-            tab_duncan = aplicar_letras(medias, duncan_dict=rp_duncan)
-            if email:
-                laudo_d = f"Teste de Duncan Fator {fator}\n\n"
-                for r in tab_duncan: laudo_d += f"{r['Nível']}: {r['Média']} {r['Letra']}\n"
-                disparar_email_laudo(email, "Duncan Fatorial", "Laudo anexo", laudo_d)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
-            return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": tab_duncan}
+            return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett_" in tipo_teste:
             if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
             media_test = medias[testemunha]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (n_niveis - 1))), gl_res) * ep * np.sqrt(2)
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
-            if email:
-                laudo_du = f"Dunnett Fator {fator}\n\n"
-                for r in res: laudo_du += f"{r['Tratamento']}: Dif={r['Diferença']}\n"
-                disparar_email_laudo(email, "Dunnett Fatorial", "Laudo anexo", laudo_du)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
@@ -512,10 +474,6 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         cv_html_str = f"A: {cv_a_val}% ({classificar_cv(cv_a_val)}) | B: {cv_b_val}% ({classificar_cv(cv_b_val)})"
 
         if tipo_teste == "anova":
-            if email:
-                laudo = f"Laudo de Parcelas Subdivididas\n\nCV {cv_html_str}\n"
-                disparar_email_laudo(email, "Laudo Split-Plot", laudo, laudo)
-                return {"status": "sucesso", "mensagem": "E-mail enviado!"}
             return {"status": "sucesso", "cv_a": f"{cv_a_val}% ({classificar_cv(cv_a_val)})", "cv_b": f"{cv_b_val}% ({classificar_cv(cv_b_val)})", "anova": anova}
 
         fator = 'A' if tipo_teste.endswith("_a") else 'B'
@@ -531,7 +489,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas."}
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
