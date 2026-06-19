@@ -1,11 +1,3 @@
-import os
-import io
-import base64
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -15,6 +7,8 @@ from statsmodels.stats.libqsturng import qsturng
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import io
+import base64
 
 app = FastAPI(title="Solver Estatística Experimental API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -64,38 +58,10 @@ def aplicar_letras(medias_series, dms_val=None, duncan_dict=None):
         
     return [{"Nível": str(trats[i]), "Média": round(vals[i], 2), "Letra": letras[i]} for i in range(n)]
 
-def disparar_email_laudo(destino_email, assunto, laudo_texto):
-    remetente = os.getenv("EMAIL_REMETENTE")
-    senha = os.getenv("EMAIL_SENHA")
-    
-    if not remetente or not senha:
-        return False
-        
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = remetente
-        msg['To'] = destino_email
-        msg['Subject'] = assunto
-        
-        corpo = "Olá!\n\nSegue em anexo o laudo técnico completo da sua análise estatística experimental processada no Solver.\n\nAtenciosamente,\nEquipe Solver Estatística."
-        msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
-        
-        part = MIMEBase('application', 'octet-stream')
-        part.set_payload(laudo_texto.encode('utf-8'))
-        encoders.encode_base64(part)
-        part.add_header('Content-Disposition', 'attachment; filename="Laudo_Estatistico_Solver.txt"')
-        msg.attach(part)
-        
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(remetente, senha)
-            server.sendmail(remetente, destino_email, msg.as_string())
-        return True
-    except Exception:
-        return False
 
 # ================= MÓDULO 1: SIMPLES (DIC/DBC/DQL) =================
 @app.post("/api/analise/simples")
-async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str = Form("dbc"), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form(""), email: str = Form("")):
+async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str = Form("dbc"), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form("")):
     try:
         content = await file.read()
         try: df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
@@ -148,20 +114,19 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 gl_bloc = nR - 1
                 gl_res = gl_tot - gl_trat - gl_bloc
                 qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
-                f_trat, f_bloc = qm_trat/qm_res if qm_res>0 else 0, sq_bloc/gl_bloc/qm_res if qm_res>0 else 0
+                f_trat, f_bloc = qm_trat/qm_res if qm_res>0 else 0, (sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
                 p_bloc = 1 - stats.f.cdf(f_bloc, gl_bloc, gl_res)
                 anova = [
                     {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
+                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
                     {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
                     {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
             else: 
                 sq_res = max(0, sq_tot - sq_trat)
                 gl_res = gl_tot - gl_trat
-                qm_trat = sq_trat/gl_trat
-                qm_res = sq_res/gl_res if gl_res>0 else 0
+                qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
                 f_trat = qm_trat/qm_res if qm_res>0 else 0
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
                 anova = [
@@ -174,11 +139,6 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
         cv_string = f"{cv_val}% ({classificar_cv(cv_val)})"
 
         if tipo_teste == "anova":
-            if email:
-                laudo = f"LAUDO TÉCNICO - EXPERIMENTO SIMPLES ({tipo_delineamento.upper()})\n\nCV do Ensaio: {cv_string}\n\nQUADRO DA ANOVA:\n"
-                for row in anova: laudo += f"{row['FV']}: GL={row['GL']}, SQ={row['SQ']}, QM={row.get('QM','-')}, F={row.get('F Calc','-')} ({row.get('Sig','-')})\n"
-                disparar_email_laudo(email, "Laudo ANOVA Simples - Solver", laudo)
-                return {"status": "sucesso", "mensagem": "Laudo enviado com sucesso para o e-mail!"}
             return {"status": "sucesso", "cv": cv_string, "anova": anova}
 
         # === POST-HOC MÓDULO 1 ===
@@ -189,7 +149,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
         if "regr" in tipo_teste:
             if pd.to_numeric(df['Trat'], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para tratamentos qualitativos, utilize os testes de médias."}
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -250,7 +210,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
 # ================= MÓDULO 2: FATORIAL DUPLO =================
 @app.post("/api/analise/fatorial")
-async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form(""), email: str = Form("")):
+async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form("")):
     try:
         content = await file.read()
         try: df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
@@ -280,43 +240,22 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
         p_inter = 1 - stats.f.cdf((sq_inter/gl_inter)/qm_res if qm_res>0 else 0, gl_inter, gl_res)
 
-        desdobramentos = []
-        if p_inter <= 0.05:
-            for b_val in sorted(df['B'].unique()):
-                df_sub = df[df['B'] == b_val]
-                sq_in = nR * ((df_sub.groupby('A')['Valor'].mean() - df_sub['Valor'].mean())**2).sum()
-                qm_in = sq_in / gl_a
-                fc_in = qm_in / qm_res if qm_res > 0 else 0
-                desdobramentos.append({"FV": f"  A d. B ({b_val})", "GL": gl_a, "SQ": round(sq_in,2), "QM": round(qm_in,2), "F Calc": round(fc_in,2), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf(fc_in, gl_a, gl_res), gl_a, gl_res)})
-            for a_val in sorted(df['A'].unique()):
-                df_sub = df[df['A'] == a_val]
-                sq_in = nR * ((df_sub.groupby('B')['Valor'].mean() - df_sub['Valor'].mean())**2).sum()
-                qm_in = sq_in / gl_b
-                fc_in = qm_in / qm_res if qm_res > 0 else 0
-                desdobramentos.append({"FV": f"  B d. A ({a_val})", "GL": gl_b, "SQ": round(sq_in,2), "QM": round(qm_in,2), "F Calc": round(fc_in,2), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf(fc_in, gl_b, gl_res), gl_b, gl_res)})
-
         anova = [
-            {"FV": "Tratamentos (Agrupados)", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
+            {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
             {"FV": "  Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(sq_a/gl_a,2), "F Calc": round((sq_a/gl_a)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_a/gl_a)/qm_res if qm_res>0 else 0, gl_a, gl_res), gl_a, gl_res)},
             {"FV": "  Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(sq_b/gl_b,2), "F Calc": round((sq_b/gl_b)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_b/gl_b)/qm_res if qm_res>0 else 0, gl_b, gl_res), gl_b, gl_res)},
-            {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": round((sq_inter/gl_inter)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_res)}
+            {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": round((sq_inter/gl_inter)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_res)},
+            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0, gl_bloc, gl_res), gl_bloc, gl_res)},
+            {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+            {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
         ]
-        anova.extend(desdobramentos)
-        anova.append({"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0, gl_bloc, gl_res), gl_bloc, gl_res)})
-        anova.append({"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"})
-        anova.append({"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"})
-
+        
         cv_val = round((np.sqrt(qm_res)/mg)*100, 2) if qm_res > 0 else 0
         cv_string = f"{cv_val}% ({classificar_cv(cv_val)})"
 
         if tipo_teste == "anova":
-            if email:
-                laudo = f"LAUDO TÉCNICO - EXPERIMENTO FATORIAL DUPLO\n\nCV do Ensaio: {cv_string}\n\nQUADRO DA ANOVA:\n"
-                for row in anova: laudo += f"{row['FV']}: GL={row['GL']}, SQ={row['SQ']}\n"
-                disparar_email_laudo(email, "Laudo Fatorial - Solver", laudo)
-                return {"status": "sucesso", "mensagem": "Laudo Fatorial enviado para o e-mail!"}
             return {"status": "sucesso", "cv": cv_string, "anova": anova}
-        
+
         # === POST-HOC MÓDULO 2 ===
         fator = 'A' if tipo_teste.endswith("_a") else 'B'
         n_niveis = nA if fator == 'A' else nB
@@ -330,7 +269,8 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): 
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para dados de texto, use Testes de Médias."}
             rep_fator = nB * nR if fator == 'A' else nA * nR
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
@@ -395,7 +335,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
 
 # ================= MÓDULO 3: PARCELAS SUBDIVIDIDAS =================
 @app.post("/api/analise/parcelas")
-async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form(""), email: str = Form("")):
+async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form("")):
     try:
         content = await file.read()
         try: df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
@@ -434,28 +374,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         f_bloc = qm_bloc / qm_erro_a if qm_erro_a > 0 else 0
         f_b = qm_b / qm_erro_b if qm_erro_b > 0 else 0
         f_inter = qm_inter / qm_erro_b if qm_erro_b > 0 else 0
-        
         p_inter = 1 - stats.f.cdf(f_inter, gl_inter, gl_erro_b)
-        
-        desdobramentos = []
-        if p_inter <= 0.05:
-            for a_val in sorted(df['A'].unique()):
-                df_sub = df[df['A'] == a_val]
-                sq_in = nR * ((df_sub.groupby('B')['Valor'].mean() - df_sub['Valor'].mean())**2).sum()
-                qm_in = sq_in / gl_b
-                fc_in = qm_in / qm_erro_b if qm_erro_b > 0 else 0
-                desdobramentos.append({"FV": f"  B d. A ({a_val})", "GL": gl_b, "SQ": round(sq_in,2), "QM": round(qm_in,2), "F Calc": round(fc_in,2), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(1 - stats.f.cdf(fc_in, gl_b, gl_erro_b), gl_b, gl_erro_b)})
-                
-            qm_comb = (qm_erro_a + (nB - 1) * qm_erro_b) / nB
-            gl_comb = (qm_comb**2) / ( ((qm_erro_a/nB)**2)/gl_erro_a + (((nB-1)*qm_erro_b/nB)**2)/gl_erro_b ) if qm_erro_a>0 and qm_erro_b>0 else gl_erro_a
-            gl_comb_int = int(round(gl_comb)) if gl_comb > 0 else 1
-            
-            for b_val in sorted(df['B'].unique()):
-                df_sub = df[df['B'] == b_val]
-                sq_in = nR * ((df_sub.groupby('A')['Valor'].mean() - df_sub['Valor'].mean())**2).sum()
-                qm_in = sq_in / gl_a
-                fc_in = qm_in / qm_comb if qm_comb > 0 else 0
-                desdobramentos.append({"FV": f"  A d. B ({b_val})", "GL": gl_a, "SQ": round(sq_in,2), "QM": round(qm_in,2), "F Calc": round(fc_in,2), "F Tab": calcular_f_tab(gl_a, gl_comb_int), "Sig": determinar_sig_texto(1 - stats.f.cdf(fc_in, gl_a, gl_comb), gl_a, gl_comb)})
 
         anova = [
             {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": round(f_a,2), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_a, gl_a, gl_erro_a), gl_a, gl_erro_a)},
@@ -463,33 +382,37 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             {"FV": "Erro A (Parcela)", "GL": gl_erro_a, "SQ": round(sq_erro_a,2), "QM": round(qm_erro_a,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Parcelas (Subtotal)", "GL": gl_parcela_total, "SQ": round(sq_parcela_total,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Fator B (Subparcela)", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": round(f_b,2), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(1-stats.f.cdf(f_b, gl_b, gl_erro_b), gl_b, gl_erro_b)},
-            {"FV": "Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": round(f_inter,2), "F Tab": calcular_f_tab(gl_inter, gl_erro_b), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_erro_b)}
+            {"FV": "Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": round(f_inter,2), "F Tab": calcular_f_tab(gl_inter, gl_erro_b), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_erro_b)},
+            {"FV": "Erro B (Subparcela)", "GL": gl_erro_b, "SQ": round(sq_erro_b,2), "QM": round(qm_erro_b,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
+            {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
         ]
-        anova.extend(desdobramentos)
-        anova.append({"FV": "Erro B (Subparcela)", "GL": gl_erro_b, "SQ": round(sq_erro_b,2), "QM": round(qm_erro_b,2), "F Calc": "-", "F Tab": "-", "Sig": "-"})
-        anova.append({"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"})
 
         cv_a_val = round((np.sqrt(qm_erro_a)/mg)*100, 2) if qm_erro_a > 0 else 0
         cv_b_val = round((np.sqrt(qm_erro_b)/mg)*100, 2) if qm_erro_b > 0 else 0
-        cv_html_str = f"A: {cv_a_val}% ({classificar_cv(cv_a_val)}) | B: {cv_b_val}% ({classificar_cv(cv_b_val)})"
 
         if tipo_teste == "anova":
             return {"status": "sucesso", "cv_a": f"{cv_a_val}% ({classificar_cv(cv_a_val)})", "cv_b": f"{cv_b_val}% ({classificar_cv(cv_b_val)})", "anova": anova}
 
+        # === POST-HOC MÓDULO 3 ===
         fator = 'A' if tipo_teste.endswith("_a") else 'B'
         n_niveis = nA if fator == 'A' else nB
         qm_err_atual = qm_erro_a if fator == 'A' else qm_erro_b
         gl_err_atual = gl_erro_a if fator == 'A' else gl_erro_b
         rep_fator = (nB * nR) if fator == 'A' else (nA * nR)
 
+        if qm_err_atual <= 0 or gl_err_atual <= 0: return {"status": "erro", "mensagem": f"O Erro {fator} é zero ou negativo, impossibilitando testes."}
         ep = np.sqrt(qm_err_atual / rep_fator)
         medias = df.groupby(fator)['Valor'].mean().sort_values(ascending=False)
-        p_fator = 1 - stats.f.cdf(qm_a/qm_erro_a if fator=='A' else qm_b/qm_erro_b, n_niveis-1, gl_err_atual)
+
+        f_calc_fator = f_a if fator == 'A' else f_b
+        gl_num_fator = gl_a if fator == 'A' else gl_b
+        p_fator = 1 - stats.f.cdf(f_calc_fator, gl_num_fator, gl_err_atual)
         alpha = 0.01 if p_fator < 0.01 else 0.05
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): 
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -515,10 +438,12 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
             f_reg = qm_reg / qm_err_atual if qm_err_atual > 0 else 0
             f_desvio = qm_desvio / qm_err_atual if qm_err_atual > 0 else 0
+            p_reg = 1 - stats.f.cdf(f_reg, gl_reg, gl_err_atual) if gl_reg > 0 else np.nan
+            p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_err_atual) if gl_desvio > 0 else np.nan
 
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_err_atual), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_reg, gl_reg, gl_err_atual), gl_reg, gl_err_atual)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_desvio, gl_desvio, gl_err_atual), gl_desvio, gl_err_atual)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_err_atual), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_err_atual)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_err_atual)},
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title(f"Ajuste Regressão - Fator {fator}"); ax.grid(True); ax.legend()
@@ -535,5 +460,12 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         if "duncan_" in tipo_teste:
             rp_duncan = {p: round(qsturng((1 - alpha)**(p-1), p, gl_err_atual) * ep, 4) for p in range(2, n_niveis + 1)}
             return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
+
+        if "dunnett_" in tipo_teste:
+            if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
+            media_test = medias[testemunha]
+            dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (n_niveis - 1))), gl_err_atual) * ep * np.sqrt(2)
+            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
+            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
