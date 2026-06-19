@@ -14,7 +14,7 @@ app = FastAPI(title="Solver Estatística Experimental API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def determinar_sig_texto(p_valor, gl_num, gl_den):
-    if pd.isna(p_valor) or gl_den <= 0 or p_valor > 1: return "ns"
+    if pd.isna(p_valor) or gl_num <= 0 or gl_den <= 0 or p_valor > 1: return "-" if gl_num <= 0 else "ns"
     if p_valor < 0.01: return "1% (**)"
     elif p_valor < 0.05: return "5% (*)"
     else: return "ns"
@@ -149,7 +149,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
         if "regr" in tipo_teste:
             if pd.to_numeric(df['Trat'], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para tratamentos em texto, utilize os testes de médias."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -164,14 +164,21 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 ax.plot(x_plot, p(x_plot), color='red', label='Quadrática', zorder=4)
                 eq, r2, gl_reg = f"y = {c[2]:.4f} {'+' if c[1]>=0 else '-'} {abs(c[1]):.4f}x {'+' if c[0]>=0 else '-'} {abs(c[0]):.4f}x²", 1 - (np.sum((y - y_pred)**2) / np.sum((y - y_mean)**2)), 2
 
-            sq_reg_raw = rep_media * np.sum((y_pred - y_mean)**2); sq_desvio_raw = max(0, sq_trat - sq_reg_raw)
+            sq_reg_raw = rep_media * np.sum((y_pred - y_mean)**2)
+            sq_desvio_raw = max(0, sq_trat - sq_reg_raw)
             gl_desvio = gl_trat - gl_reg
-            qm_reg, qm_desvio = sq_reg_raw / gl_reg, sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
-            f_reg, f_desvio = qm_reg / qm_res if qm_res > 0 else 0, qm_desvio / qm_res if qm_res > 0 else 0
+            
+            qm_reg = sq_reg_raw / gl_reg if gl_reg > 0 else 0
+            qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
+            f_reg = qm_reg / qm_res if qm_res > 0 else 0
+            f_desvio = qm_desvio / qm_res if qm_res > 0 else 0
+            
+            p_reg = 1 - stats.f.cdf(f_reg, gl_reg, gl_res) if gl_reg > 0 else np.nan
+            p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_res) if gl_desvio > 0 else np.nan
             
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2), "F Calc": round(f_reg, 2), "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_reg, gl_reg, gl_res), gl_reg, gl_res)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2), "F Calc": round(f_desvio, 2), "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_desvio, gl_desvio, gl_res), gl_desvio, gl_res)}
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)}
             ]
             ax.set_title("Ajuste de Regressão"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
             b_png, b_pdf = io.BytesIO(), io.BytesIO()
@@ -215,7 +222,6 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         sq_b = (nA*nR) * ((df.groupby('B')['Valor'].mean() - mg)**2).sum()
         sq_inter = nR * ((df.groupby(['A', 'B'])['Valor'].mean() - mg)**2).sum() - sq_a - sq_b
         
-        # Agrupamento de Tratamentos (A + B + AxB)
         sq_trat = sq_a + sq_b + sq_inter
         gl_trat = (nA * nB) - 1
         qm_trat = sq_trat / gl_trat
@@ -243,6 +249,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
                 ]
             }
         
+        # === POST-HOC MÓDULO 2 ===
         fator = 'A' if tipo_teste.endswith("_a") else 'B'
         n_niveis = nA if fator == 'A' else nB
         ep = np.sqrt(qm_res/(nB*nR)) if fator == 'A' else np.sqrt(qm_res/(nA*nR))
@@ -255,7 +262,8 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): 
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para dados textuais, utilize os testes de médias."}
             rep_fator = nB * nR if fator == 'A' else nA * nR
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
@@ -273,14 +281,20 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
 
             sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
-            gl_fator_real = (nA - 1) if fator == 'A' else (nB - 1)
+            gl_fator_real = gl_a if fator == 'A' else gl_b
             gl_desvio = gl_fator_real - gl_reg
-            qm_reg, qm_desvio = sq_reg_raw / gl_reg, sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
-            f_reg, f_desvio = qm_reg / qm_res if qm_res > 0 else 0, qm_desvio / qm_res if qm_res > 0 else 0
+            
+            qm_reg = sq_reg_raw / gl_reg if gl_reg > 0 else 0
+            qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
+            f_reg = qm_reg / qm_res if qm_res > 0 else 0
+            f_desvio = qm_desvio / qm_res if qm_res > 0 else 0
+            
+            p_reg = 1 - stats.f.cdf(f_reg, gl_reg, gl_res) if gl_reg > 0 else np.nan
+            p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_res) if gl_desvio > 0 else np.nan
 
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2), "F Calc": round(f_reg, 2), "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_reg, gl_reg, gl_res), gl_reg, gl_res)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2), "F Calc": round(f_desvio, 2), "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_desvio, gl_desvio, gl_res), gl_desvio, gl_res)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
             ]
             ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
             b_png, b_pdf = io.BytesIO(), io.BytesIO()
@@ -296,7 +310,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett_" in tipo_teste:
-            if not延 testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
+            if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
             media_test = medias[testemunha]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (n_niveis - 1))), gl_res) * ep * np.sqrt(2)
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
@@ -324,7 +338,6 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         sq_a_bloc = nB * ((df.groupby(['A', 'Bloco'])['Valor'].mean() - mg)**2).sum()
         sq_erro_a = max(0, sq_a_bloc - sq_a - sq_bloc)
         
-        # Subtotal de Variação das Parcelas (Fator A + Blocos + Erro A)
         sq_parcela_total = sq_a + sq_bloc + sq_erro_a
         gl_parcela_total = (nA * nR) - 1
         
@@ -381,7 +394,8 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
         if "regr_" in tipo_teste:
-            if pd.to_numeric(df[fator], errors='coerce').isna().any(): return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
+            if pd.to_numeric(df[fator], errors='coerce').isna().any(): 
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -398,14 +412,20 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
 
             sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
-            gl_fator_real = (nA - 1) if fator == 'A' else (nB - 1)
+            gl_fator_real = gl_a if fator == 'A' else gl_b
             gl_desvio = gl_fator_real - gl_reg
-            qm_reg, qm_desvio = sq_reg_raw / gl_reg, sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
-            f_reg, f_desvio = qm_reg / qm_err_atual if qm_err_atual > 0 else 0, qm_desvio / qm_err_atual if qm_err_atual > 0 else 0
+            
+            qm_reg = sq_reg_raw / gl_reg if gl_reg > 0 else 0
+            qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
+            f_reg = qm_reg / qm_err_atual if qm_err_atual > 0 else 0
+            f_desvio = qm_desvio / qm_err_atual if qm_err_atual > 0 else 0
+            
+            p_reg = 1 - stats.f.cdf(f_reg, gl_reg, gl_err_atual) if gl_reg > 0 else np.nan
+            p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_err_atual) if gl_desvio > 0 else np.nan
 
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2), "F Calc": round(f_reg, 2), "F Tab": calcular_f_tab(gl_reg, gl_err_atual), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_reg, gl_reg, gl_err_atual), gl_reg, gl_err_atual)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2), "F Calc": round(f_desvio, 2), "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(1 - stats.f.cdf(f_desvio, gl_desvio, gl_err_atual), gl_desvio, gl_err_atual)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_err_atual), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_err_atual)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_err_atual)},
             ]
             ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
             b_png, b_pdf = io.BytesIO(), io.BytesIO()
