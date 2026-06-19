@@ -145,76 +145,90 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         ep = np.sqrt(qm_res/(nB*nR)) if fator == 'A' else np.sqrt(qm_res/(nA*nR))
         medias = df.groupby(fator)['Valor'].mean().sort_values(ascending=False)
 
+        # ================= ANOVA DA REGRESSÃO =================
         if "regr_" in tipo_teste:
             if pd.to_numeric(df[fator], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "Regressão exige doses numéricas."}
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas (quantitativas). Para tratamentos qualitativos, utilize os testes de médias."}
                 
+            rep_fator = nB * nR if fator == 'A' else nA * nR
             x = np.array(medias.index, dtype=float)
             y = np.array(medias.values, dtype=float)
+            y_mean = np.mean(y)
+            
             fig, ax = plt.subplots(figsize=(8, 5))
-            ax.scatter(x, y, color='black', label='Médias')
+            ax.scatter(x, y, color='black', label='Médias Observadas', zorder=5)
             x_plot = np.linspace(min(x), max(x), 100)
             
             if modelo_regr == "linear":
                 s, i, r, _, _ = stats.linregress(x, y)
-                ax.plot(x_plot, i + s * x_plot, color='blue')
-                eq = f"y = {i:.4f} + {s:.4f}x"
-                r2 = f"{r**2:.4f}"
+                y_pred = i + s * x
+                ax.plot(x_plot, i + s * x_plot, color='blue', label='Ajuste Linear', zorder=4)
+                eq = f"y = {i:.4f} {'+' if s>=0 else '-'} {abs(s):.4f}x"
+                r2 = r**2
+                gl_reg = 1
             elif modelo_regr == "quadratica":
                 c = np.polyfit(x, y, 2)
                 p = np.poly1d(c)
-                ax.plot(x_plot, p(x_plot), color='red')
-                eq = f"y = {c[2]:.4f} + ({c[1]:.4f})x + ({c[0]:.4f})x²"
-                r2 = f"{1 - (np.sum((y - p(x))**2) / np.sum((y - np.mean(y))**2)):.4f}"
-            elif modelo_regr == "logaritmica":
-                s, i, r, _, _ = stats.linregress(np.log(x), y)
-                ax.plot(x_plot, i + s * np.log(x_plot), color='green')
-                eq = f"y = {i:.4f} + {s:.4f} * ln(x)"
-                r2 = f"{r**2:.4f}"
-            elif modelo_regr == "exponencial":
-                s, i, r, _, _ = stats.linregress(x, np.log(y))
-                ax.plot(x_plot, np.exp(i) * np.exp(s * x_plot), color='purple')
-                eq = f"y = {np.exp(i):.4f} * e^({s:.4f}x)"
-                r2 = f"{r**2:.4f}"
+                y_pred = p(x)
+                ax.plot(x_plot, p(x_plot), color='red', label='Ajuste Quadrático', zorder=4)
+                eq = f"y = {c[2]:.4f} {'+' if c[1]>=0 else '-'} {abs(c[1]):.4f}x {'+' if c[0]>=0 else '-'} {abs(c[0]):.4f}x²"
+                ss_res_m = np.sum((y - y_pred)**2)
+                ss_tot_m = np.sum((y - y_mean)**2)
+                r2 = 1 - (ss_res_m / ss_tot_m)
+                gl_reg = 2
 
-            ax.set_title(f"Regressão - Fator {fator}")
-            ax.grid(True)
+            # Cálculos do Quadro de ANOVA específico para a Regressão
+            sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2)
+            sq_trat_raw = sq_a if fator == 'A' else sq_b
+            sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
+            gl_trat = (nA - 1) if fator == 'A' else (nB - 1)
+            gl_desvio = gl_trat - gl_reg
+
+            qm_reg = sq_reg_raw / gl_reg
+            qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
+
+            f_reg = qm_reg / qm_res if qm_res > 0 else 0
+            f_desvio = qm_desvio / qm_res if qm_res > 0 else 0
+
+            p_reg = 1 - stats.f.cdf(f_reg, gl_reg, gl_res)
+            p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_res)
+
+            anova_reg = [
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2), "F Calc": round(f_reg, 2), "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2), "F Calc": round(f_desvio, 2), "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
+                {"FV": "Resíduo (da ANOVA)", "GL": gl_res, "SQ": round(sq_res, 2), "QM": round(qm_res, 2), "F Calc": "-", "F Tab": "-", "Sig": "-"}
+            ]
+
+            ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}")
+            ax.set_xlabel("Doses")
+            ax.set_ylabel("Produção / Resposta")
+            ax.legend()
+            ax.grid(True, linestyle='--', alpha=0.6)
+            
             b_png, b_pdf = io.BytesIO(), io.BytesIO()
-            fig.savefig(b_png, format="png")
-            fig.savefig(b_pdf, format="pdf")
+            fig.savefig(b_png, format="png", bbox_inches='tight')
+            fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
             plt.close(fig)
             
             return {
                 "status": "sucesso", 
                 "tipo": "regressao", 
                 "equacao": eq, 
-                "r2": r2, 
+                "r2": f"{r2:.4f}", 
                 "modelo": modelo_regr.capitalize(), 
                 "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), 
-                "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8')
+                "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'),
+                "anova_reg": anova_reg
             }
 
         if "tukey_" in tipo_teste:
             q_crit = qsturng(0.95, n_niveis, gl_res)
             dms = q_crit * ep
-            tabela_tukey = [{"Nível": str(n), "Média": round(v, 2)} for n, v in medias.items()]
-            return {
-                "status": "sucesso", 
-                "tipo": "tukey", 
-                "q": round(q_crit, 4), 
-                "dms": round(dms, 4), 
-                "tabela": tabela_tukey
-            }
+            return {"status": "sucesso", "tipo": "tukey", "q": round(q_crit, 4), "dms": round(dms, 4), "tabela": [{"Nível": str(n), "Média": round(v, 2)} for n, v in medias.items()]}
         
         if "duncan_" in tipo_teste:
             rp_duncan = {p: round(qsturng((0.95)**(p-1), p, gl_res) * ep, 4) for p in range(2, n_niveis + 1)}
-            tabela_duncan = [{"Nível": str(n), "Média": round(v, 2)} for n, v in medias.items()]
-            return {
-                "status": "sucesso", 
-                "tipo": "duncan", 
-                "alcances": rp_duncan, 
-                "tabela": tabela_duncan
-            }
+            return {"status": "sucesso", "tipo": "duncan", "alcances": rp_duncan, "tabela": [{"Nível": str(n), "Média": round(v, 2)} for n, v in medias.items()]}
 
         if "dunnett_" in tipo_teste:
             if not testemunha or testemunha not in medias.index:
@@ -222,28 +236,13 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             media_test = medias[testemunha]
             t_crit = stats.t.ppf(1 - (0.05 / (2 * (n_niveis - 1))), gl_res)
             dms_dunnett = t_crit * ep * np.sqrt(2)
-            
             resultados = []
             for n, v in medias.items():
-                if n == testemunha: 
-                    continue
+                if n == testemunha: continue
                 dif = v - media_test
                 sig = "Significativo (*)" if abs(dif) >= dms_dunnett else "ns"
-                resultados.append({
-                    "Tratamento": str(n), 
-                    "Média": round(v, 2), 
-                    "Diferença": round(dif, 2), 
-                    "Sig": sig
-                })
-                
-            return {
-                "status": "sucesso", 
-                "tipo": "dunnett", 
-                "dms": round(dms_dunnett, 4), 
-                "testemunha": testemunha, 
-                "media_testemunha": round(media_test, 2), 
-                "resultados": resultados
-            }
+                resultados.append({"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(dif, 2), "Sig": sig})
+            return {"status": "sucesso", "tipo": "dunnett", "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": resultados}
 
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))
