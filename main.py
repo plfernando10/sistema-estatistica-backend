@@ -29,9 +29,9 @@ def calcular_f_tab(gl_num, gl_den, alpha=0.95):
     if gl_num > 0 and gl_den > 0: return round(stats.f.ppf(alpha, gl_num, gl_den), 2)
     return "-"
 
-def aplicar_letras(medias_dict, dms_val=None, duncan_dict=None):
-    trats = list(medias_dict.keys())
-    vals = list(medias_dict.values())
+def aplicar_letras(medias_series, dms_val=None, duncan_dict=None):
+    trats = list(medias_series.index)
+    vals = list(medias_series.values)
     n = len(vals)
     grupos = []
     
@@ -39,14 +39,13 @@ def aplicar_letras(medias_dict, dms_val=None, duncan_dict=None):
         grupo_atual = [i]
         for j in range(i+1, n):
             diff = vals[i] - vals[j]
-            dms = dms_val if dms_val else duncan_dict[j - i + 1]
+            dms = dms_val if dms_val is not None else duncan_dict[j - i + 1]
             if diff <= dms: grupo_atual.append(j)
             
         is_subset = False
         for g in grupos:
             if set(grupo_atual).issubset(set(g)):
-                is_subset = True
-                break
+                is_subset = True; break
         if not is_subset: grupos.append(grupo_atual)
             
     letras = ["" for _ in range(n)]
@@ -56,7 +55,7 @@ def aplicar_letras(medias_dict, dms_val=None, duncan_dict=None):
         for idx in g: letras[idx] += l
         letra_char += 1
         
-    return [{"Nível": trats[i], "Média": round(vals[i], 2), "Letra": letras[i]} for i in range(n)]
+    return [{"Nível": str(trats[i]), "Média": round(vals[i], 2), "Letra": letras[i]} for i in range(n)]
 
 # ================= MÓDULO 1: SIMPLES (DIC/DBC/DQL) =================
 @app.post("/api/analise/simples")
@@ -128,7 +127,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             cv_val = round((np.sqrt(qm_res)/mg)*100, 2) if qm_res > 0 else 0
             return {"status": "sucesso", "cv": f"{cv_val}% ({classificar_cv(cv_val)})", "anova": anova}
 
-        # === POST-HOC MÓDULO 1 ===
+        # === POST-HOC (MÓDULO 1) ===
         alpha = 0.01 if p_trat < 0.01 else 0.05
         alpha_txt = "1%" if p_trat < 0.01 else "5%"
         ep = np.sqrt(qm_res / rep_media)
@@ -136,7 +135,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
 
         if "regr" in tipo_teste:
             if pd.to_numeric(df['Trat'], errors='coerce').isna().any(): 
-                return {"status": "erro", "mensagem": "Regressão exige doses numéricas quantitativas."}
+                return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas. Para tratamentos em texto, utilize testes de médias."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
             fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
@@ -181,7 +180,6 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
-
 
 # ================= MÓDULO 2: FATORIAL (A x B) =================
 @app.post("/api/analise/fatorial")
