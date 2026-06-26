@@ -184,10 +184,13 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 {"FV": "Total dos Tratamentos", "GL": gl_trat, "SQ": round(sq_trat, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title("Ajuste de Regressão"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
-            b_png, b_pdf = io.BytesIO(), io.BytesIO()
-            fig.savefig(b_png, format="png", bbox_inches='tight'); fig.savefig(b_pdf, format="pdf", bbox_inches='tight'); plt.close(fig)
+            b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
+            fig.savefig(b_png, format="png", bbox_inches='tight')
+            fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
+            fig.savefig(b_svg, format="svg", bbox_inches='tight')
+            plt.close(fig)
             
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -309,10 +312,13 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
-            b_png, b_pdf = io.BytesIO(), io.BytesIO()
-            fig.savefig(b_png, format="png", bbox_inches='tight'); fig.savefig(b_pdf, format="pdf", bbox_inches='tight'); plt.close(fig)
+            b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
+            fig.savefig(b_png, format="png", bbox_inches='tight')
+            fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
+            fig.savefig(b_svg, format="svg", bbox_inches='tight')
+            plt.close(fig)
             
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -433,6 +439,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
                     ax.scatter(x_otimo, y_otimo, color='red', marker='*', s=150, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
 
             sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
+            sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
             gl_fator_real = n_niveis - 1; gl_desvio = gl_fator_real - gl_reg
             qm_reg = sq_reg_raw / gl_reg if gl_reg > 0 else 0
             qm_desvio = sq_desvio_raw / gl_desvio if gl_desvio > 0 else 0
@@ -449,7 +456,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             ax.set_title(f"Ajuste Regressão - Fator {fator}"); ax.grid(True); ax.legend()
             b_png, b_pdf = io.BytesIO(), io.BytesIO()
             fig.savefig(b_png, format="png"); fig.savefig(b_pdf, format="pdf"); plt.close(fig)
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -469,3 +476,110 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================= MÓDULO ADICIONAL: REGRESSÃO DIRETA DOSE x PRODUTIVIDADE =================
+def _parse_lista_numerica(texto: str):
+    if not texto:
+        return []
+    import re
+    texto = texto.strip()
+    # Preferimos separar por linha, ponto e vírgula ou tabulação para preservar decimal com vírgula (ex.: 16,3).
+    if re.search(r'[;\n\r\t]', texto):
+        partes = [x for x in re.split(r'[;\n\r\t]+', texto) if x.strip()]
+    else:
+        partes = [x for x in re.split(r'\s+', texto) if x.strip()]
+    return [float(x.strip().replace(',', '.')) for x in partes]
+
+def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
+    x = np.array(x, dtype=float)
+    y = np.array(y, dtype=float)
+    if len(x) != len(y) or len(x) < 2:
+        raise ValueError("Informe a mesma quantidade de doses e produtividades, com pelo menos 2 pares.")
+    ordem = np.argsort(x)
+    x, y = x[ordem], y[ordem]
+    grau = {"linear": 1, "quadratica": 2, "quadrática": 2, "cubica": 3, "cúbica": 3}.get(str(modelo_regr).lower(), 2)
+    if len(x) <= grau:
+        raise ValueError(f"O modelo selecionado exige pelo menos {grau + 1} pontos.")
+
+    coef = np.polyfit(x, y, grau)
+    pol = np.poly1d(coef)
+    y_pred = pol(x)
+    ss_res = float(np.sum((y - y_pred) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
+
+    x_plot = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+    y_plot = pol(x_plot)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.scatter(x, y, color='black', label='Dados informados', zorder=5)
+    ax.plot(x_plot, y_plot, color='red' if grau > 1 else 'blue', label='Ajuste', zorder=4)
+    ax.set_xlabel('Dose')
+    ax.set_ylabel('Produtividade')
+    ax.set_title('Regressão direta: dose x produtividade')
+    ax.grid(True, linestyle='--', alpha=0.6)
+
+    x_otimo = y_otimo = None
+    if grau == 2 and coef[0] != 0:
+        xo = -coef[1] / (2 * coef[0])
+        if np.isfinite(xo):
+            x_otimo = float(xo)
+            y_otimo = float(pol(x_otimo))
+            ax.axvline(x=x_otimo, color='gray', linestyle='--', alpha=0.5)
+            ax.scatter(x_otimo, y_otimo, color='red', marker='*', s=150, zorder=6, label=f'Dose ótima: {x_otimo:.2f}')
+
+    ax.legend()
+    b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
+    fig.savefig(b_png, format='png', bbox_inches='tight')
+    fig.savefig(b_pdf, format='pdf', bbox_inches='tight')
+    fig.savefig(b_svg, format='svg', bbox_inches='tight')
+    plt.close(fig)
+
+    if grau == 1:
+        eq = f"y = {coef[1]:.4f} {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x"
+        modelo_nome = "Linear"
+    elif grau == 2:
+        eq = f"y = {coef[2]:.4f} {'+' if coef[1] >= 0 else '-'} {abs(coef[1]):.4f}x {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x²"
+        modelo_nome = "Quadrática"
+    else:
+        eq = f"y = {coef[3]:.4f} {'+' if coef[2] >= 0 else '-'} {abs(coef[2]):.4f}x {'+' if coef[1] >= 0 else '-'} {abs(coef[1]):.4f}x² {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x³"
+        modelo_nome = "Cúbica"
+
+    res = {
+        "status": "sucesso",
+        "tipo": "regressao_direta",
+        "modelo": modelo_nome,
+        "equacao": eq,
+        "r2": f"{r2:.4f}",
+        "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'),
+        "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'),
+        "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'),
+        "pontos": [{"Dose": round(float(a), 4), "Produtividade": round(float(b), 4), "Estimado": round(float(c), 4)} for a, b, c in zip(x, y, y_pred)]
+    }
+    if x_otimo is not None:
+        res.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
+    return res
+
+@app.post("/api/analise/regressao-direta")
+async def regressao_direta(file: UploadFile = File(None), doses: str = Form(""), produtividades: str = Form(""), modelo_regr: str = Form("quadratica")):
+    try:
+        if file is not None:
+            content = await file.read()
+            try:
+                df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
+            except Exception:
+                df = pd.read_csv(io.BytesIO(content), sep=',', decimal='.')
+            if df.shape[1] < 2:
+                return {"status": "erro", "mensagem": "O CSV precisa ter ao menos duas colunas: Dose e Produtividade."}
+            x = pd.to_numeric(df.iloc[:, 0].astype(str).str.replace(',', '.'), errors='coerce')
+            y = pd.to_numeric(df.iloc[:, 1].astype(str).str.replace(',', '.'), errors='coerce')
+            dados = pd.DataFrame({'Dose': x, 'Produtividade': y}).dropna()
+            return _ajustar_regressao_direta(dados['Dose'].values, dados['Produtividade'].values, modelo_regr)
+
+        x = _parse_lista_numerica(doses)
+        y = _parse_lista_numerica(produtividades)
+        return _ajustar_regressao_direta(x, y, modelo_regr)
+    except ValueError as e:
+        return {"status": "erro", "mensagem": str(e)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
