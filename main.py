@@ -509,15 +509,12 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
     ss_tot = float(np.sum((y - np.mean(y)) ** 2))
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
 
-    x_plot = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+    x_min, x_max = float(np.min(x)), float(np.max(x))
+    y_min_d, y_max_d = float(np.min(y)), float(np.max(y))
+    dx = (x_max - x_min) or 1.0
+    dy = (y_max_d - y_min_d) or 1.0
+    x_plot = np.linspace(x_min, x_max, 300)
     y_plot = pol(x_plot)
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(x, y, color='black', label='Dados informados', zorder=5)
-    ax.plot(x_plot, y_plot, color='red' if grau > 1 else 'blue', label='Ajuste', zorder=4)
-    ax.set_xlabel('Dose')
-    ax.set_ylabel('Produtividade')
-    ax.set_title('Regressão direta: dose x produtividade')
-    ax.grid(True, linestyle='--', alpha=0.6)
 
     x_otimo = y_otimo = None
     if grau == 2 and coef[0] != 0:
@@ -525,14 +522,56 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
         if np.isfinite(xo):
             x_otimo = float(xo)
             y_otimo = float(pol(x_otimo))
-            ax.axvline(x=x_otimo, color='gray', linestyle='--', alpha=0.5)
-            ax.scatter(x_otimo, y_otimo, color='red', marker='*', s=150, zorder=6, label=f'Dose ótima: {x_otimo:.2f}')
 
-    ax.legend()
+    # Gráfico mais limpo para laudo: visual leve, curva verde, ponto ótimo destacado e sem legenda pesada.
+    fig, ax = plt.subplots(figsize=(9.2, 5.4), dpi=150)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#fbfdfb')
+
+    ax.plot(x_plot, y_plot, color='#2d7244', linewidth=3.0, solid_capstyle='round', label='Curva ajustada', zorder=3)
+    ax.scatter(x, y, s=78, color='#0f172a', edgecolor='white', linewidth=1.5, label='Dados observados', zorder=4)
+
+    y_all = np.r_[y, y_plot]
+    if y_otimo is not None:
+        y_all = np.r_[y_all, y_otimo]
+    y_min, y_max = float(np.min(y_all)), float(np.max(y_all))
+    y_pad = (y_max - y_min) * 0.16 if y_max > y_min else 1.0
+    ax.set_xlim(x_min - dx * 0.05, x_max + dx * 0.05)
+    ax.set_ylim(y_min - y_pad, y_max + y_pad)
+
+    if x_otimo is not None:
+        ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), linewidth=1.4, zorder=1)
+        ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=260, edgecolor='white', linewidth=1.1, zorder=5)
+        ax.annotate(
+            f"Dose ótima: {x_otimo:.2f}\nProd. ótima: {y_otimo:.2f}",
+            xy=(x_otimo, y_otimo),
+            xytext=(14, 18),
+            textcoords='offset points',
+            fontsize=10.5,
+            fontweight='bold',
+            color='#1b3c28',
+            bbox=dict(boxstyle='round,pad=0.45', fc='white', ec='#dcf1e1', lw=1.2, alpha=0.96),
+            arrowprops=dict(arrowstyle='->', color='#2d7244', lw=1.2),
+            zorder=6
+        )
+
+    ax.set_title('Regressão direta para dose ótima', fontsize=15, fontweight='bold', color='#0f172a', pad=14)
+    ax.set_xlabel('Dose', fontsize=11.5, fontweight='bold', color='#334155')
+    ax.set_ylabel('Produtividade', fontsize=11.5, fontweight='bold', color='#334155')
+    ax.grid(True, which='major', color='#e2e8f0', linewidth=1, linestyle='-')
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#cbd5e1')
+    ax.spines['bottom'].set_color('#cbd5e1')
+    ax.tick_params(colors='#475569', labelsize=10)
+    ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0', framealpha=0.96, fontsize=10)
+    fig.tight_layout()
+
     b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
-    fig.savefig(b_png, format='png', bbox_inches='tight')
-    fig.savefig(b_pdf, format='pdf', bbox_inches='tight')
-    fig.savefig(b_svg, format='svg', bbox_inches='tight')
+    fig.savefig(b_png, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
+    fig.savefig(b_pdf, format='pdf', bbox_inches='tight', facecolor=fig.get_facecolor())
+    fig.savefig(b_svg, format='svg', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
 
     if grau == 1:
@@ -557,7 +596,11 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
         "pontos": [{"Dose": round(float(a), 4), "Produtividade": round(float(b), 4), "Estimado": round(float(c), 4)} for a, b, c in zip(x, y, y_pred)]
     }
     if x_otimo is not None:
-        res.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
+        res.update({
+            "dose_otima": f"{x_otimo:.2f}",
+            "resposta_otima": f"{y_otimo:.2f}",
+            "produtividade_otima": f"{y_otimo:.2f}"
+        })
     return res
 
 @app.post("/api/analise/regressao-direta")
