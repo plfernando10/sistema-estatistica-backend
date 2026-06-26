@@ -168,22 +168,22 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
-            fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
+            fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='#0f172a', edgecolor='white', linewidth=1.2, label='Médias', zorder=5)
             x_plot = np.linspace(min(x), max(x), 100)
             
             x_otimo, y_otimo = None, None
             if modelo_regr == "linear":
                 s, i, r, _, _ = stats.linregress(x, y); y_pred = i + s * x
-                ax.plot(x_plot, i + s * x_plot, color='blue', label='Linear', zorder=4)
+                ax.plot(x_plot, i + s * x_plot, color='#2d7244', linewidth=3, label='Linear', zorder=4)
                 eq, r2, gl_reg = f"y = {i:.4f} {'+' if s>=0 else '-'} {abs(s):.4f}x", r**2, 1
             elif modelo_regr == "quadratica":
                 c = np.polyfit(x, y, 2); p = np.poly1d(c); y_pred = p(x)
-                ax.plot(x_plot, p(x_plot), color='red', label='Quadrática', zorder=4)
+                ax.plot(x_plot, p(x_plot), color='#2d7244', linewidth=3, label='Quadrática', zorder=4)
                 eq, r2, gl_reg = f"y = {c[2]:.4f} {'+' if c[1]>=0 else '-'} {abs(c[1]):.4f}x {'+' if c[0]>=0 else '-'} {abs(c[0]):.4f}x²", 1 - (np.sum((y - y_pred)**2) / np.sum((y - y_mean)**2)), 2
                 if c[0] != 0:
                     x_otimo = -c[1] / (2 * c[0]); y_otimo = p(x_otimo)
-                    ax.axvline(x=x_otimo, color='gray', linestyle='--', alpha=0.5)
-                    ax.scatter(x_otimo, y_otimo, color='red', marker='*', s=150, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
+                    ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), alpha=0.85)
+                    ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=220, edgecolor='white', linewidth=1.0, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
 
             sq_reg_raw = rep_media * np.sum((y_pred - y_mean)**2); sq_desvio_raw = max(0, sq_trat - sq_reg_raw)
             gl_desvio = gl_trat - gl_reg
@@ -199,7 +199,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": formatar_f_calc(f_desvio) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
                 {"FV": "Total dos Tratamentos", "GL": gl_trat, "SQ": round(sq_trat, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
-            ax.set_title("Ajuste de Regressão"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
+            ax.set_title('Ajuste de regressão', fontsize=15, fontweight='bold', color='#0f172a'); ax.grid(True, color='#e2e8f0', linewidth=1); ax.set_facecolor('#fbfdfb'); ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False); ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0')
             b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
             fig.savefig(b_png, format="png", bbox_inches='tight')
             fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
@@ -293,22 +293,22 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             rep_fator = nB * nR if fator == 'A' else nA * nR
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
-            fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
+            fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='#0f172a', edgecolor='white', linewidth=1.2, label='Médias', zorder=5)
             x_plot = np.linspace(min(x), max(x), 100)
             
             x_otimo, y_otimo = None, None
             if modelo_regr == "linear":
                 s, i, r, _, _ = stats.linregress(x, y); y_pred = i + s * x
-                ax.plot(x_plot, i + s * x_plot, color='blue', label='Linear', zorder=4)
+                ax.plot(x_plot, i + s * x_plot, color='#2d7244', linewidth=3, label='Linear', zorder=4)
                 eq, r2, gl_reg = f"y = {i:.4f} {'+' if s>=0 else '-'} {abs(s):.4f}x", r**2, 1
             elif modelo_regr == "quadratica":
                 c = np.polyfit(x, y, 2); p = np.poly1d(c); y_pred = p(x)
-                ax.plot(x_plot, p(x_plot), color='red', label='Quadrática', zorder=4)
+                ax.plot(x_plot, p(x_plot), color='#2d7244', linewidth=3, label='Quadrática', zorder=4)
                 eq, r2, gl_reg = f"y = {c[2]:.4f} {'+' if c[1]>=0 else '-'} {abs(c[1]):.4f}x {'+' if c[0]>=0 else '-'} {abs(c[0]):.4f}x²", 1 - (np.sum((y - y_pred)**2) / np.sum((y - y_mean)**2)), 2
                 if c[0] != 0:
                     x_otimo = -c[1] / (2 * c[0]); y_otimo = p(x_otimo)
-                    ax.axvline(x=x_otimo, color='gray', linestyle='--', alpha=0.5)
-                    ax.scatter(x_otimo, y_otimo, color='red', marker='*', s=150, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
+                    ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), alpha=0.85)
+                    ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=220, edgecolor='white', linewidth=1.0, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
 
             sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
@@ -327,7 +327,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
                 {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": formatar_f_calc(f_desvio) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
-            ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
+            ax.set_title(f'Ajuste {modelo_regr.capitalize()} - Fator {fator}', fontsize=15, fontweight='bold', color='#0f172a'); ax.grid(True, color='#e2e8f0', linewidth=1); ax.set_facecolor('#fbfdfb'); ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False); ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0')
             b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
             fig.savefig(b_png, format="png", bbox_inches='tight')
             fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
@@ -437,22 +437,22 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
                 return {"status": "erro", "mensagem": "A regressão exige doses numéricas quantitativas."}
             x, y = np.array(medias.index, dtype=float), np.array(medias.values, dtype=float)
             y_mean = np.mean(y)
-            fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='black', label='Médias', zorder=5)
+            fig, ax = plt.subplots(figsize=(8, 5)); ax.scatter(x, y, color='#0f172a', edgecolor='white', linewidth=1.2, label='Médias', zorder=5)
             x_plot = np.linspace(min(x), max(x), 100)
             
             x_otimo, y_otimo = None, None
             if modelo_regr == "linear":
                 s, i, r, _, _ = stats.linregress(x, y); y_pred = i + s * x
-                ax.plot(x_plot, i + s * x_plot, color='blue', label='Linear', zorder=4)
+                ax.plot(x_plot, i + s * x_plot, color='#2d7244', linewidth=3, label='Linear', zorder=4)
                 eq, r2, gl_reg = f"y = {i:.4f} {'+' if s>=0 else '-'} {abs(s):.4f}x", r**2, 1
             elif modelo_regr == "quadratica":
                 c = np.polyfit(x, y, 2); p = np.poly1d(c); y_pred = p(x)
-                ax.plot(x_plot, p(x_plot), color='red', label='Quadrática', zorder=4)
+                ax.plot(x_plot, p(x_plot), color='#2d7244', linewidth=3, label='Quadrática', zorder=4)
                 eq, r2, gl_reg = f"y = {c[2]:.4f} {'+' if c[1]>=0 else '-'} {abs(c[1]):.4f}x {'+' if c[0]>=0 else '-'} {abs(c[0]):.4f}x²", 1 - (np.sum((y - y_pred)**2) / np.sum((y - y_mean)**2)), 2
                 if c[0] != 0:
                     x_otimo = -c[1] / (2 * c[0]); y_otimo = p(x_otimo)
-                    ax.axvline(x=x_otimo, color='gray', linestyle='--', alpha=0.5)
-                    ax.scatter(x_otimo, y_otimo, color='red', marker='*', s=150, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
+                    ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), alpha=0.85)
+                    ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=220, edgecolor='white', linewidth=1.0, zorder=6, label=f'Dose Ótima: {x_otimo:.2f}')
 
             sq_reg_raw = rep_fator * np.sum((y_pred - y_mean)**2); sq_trat_raw = sq_a if fator == 'A' else sq_b
             sq_desvio_raw = max(0, sq_trat_raw - sq_reg_raw)
@@ -469,7 +469,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
                 {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": formatar_f_calc(f_desvio) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_err_atual)},
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
-            ax.set_title(f"Ajuste Regressão - Fator {fator}"); ax.grid(True); ax.legend()
+            ax.set_title(f'Ajuste de regressão - Fator {fator}', fontsize=15, fontweight='bold', color='#0f172a'); ax.grid(True, color='#e2e8f0', linewidth=1); ax.set_facecolor('#fbfdfb'); ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False); ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0')
             b_png, b_pdf = io.BytesIO(), io.BytesIO()
             fig.savefig(b_png, format="png"); fig.savefig(b_pdf, format="pdf"); plt.close(fig)
             res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": modelo_regr.capitalize(), "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
@@ -507,79 +507,113 @@ def _parse_lista_numerica(texto: str):
         partes = [x for x in re.split(r'\s+', texto) if x.strip()]
     return [float(x.strip().replace(',', '.')) for x in partes]
 
+def _modelo_nome(modelo_regr: str):
+    m = str(modelo_regr or "quadratica").lower().strip()
+    aliases = {
+        "linear": "linear",
+        "quadratica": "quadratica", "quadrática": "quadratica",
+        "cubica": "cubica", "cúbica": "cubica",
+        "exponencial": "exponencial", "exp": "exponencial",
+        "logaritmica": "logaritmica", "logarítmica": "logaritmica", "log": "logaritmica"
+    }
+    return aliases.get(m, "quadratica")
+
+def _fmt2(v):
+    return f"{float(v):.2f}"
+
 def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
     x = np.array(x, dtype=float)
     y = np.array(y, dtype=float)
+    mask = np.isfinite(x) & np.isfinite(y)
+    x, y = x[mask], y[mask]
     if len(x) != len(y) or len(x) < 2:
         raise ValueError("Informe a mesma quantidade de doses e produtividades, com pelo menos 2 pares.")
     ordem = np.argsort(x)
     x, y = x[ordem], y[ordem]
-    grau = {"linear": 1, "quadratica": 2, "quadrática": 2, "cubica": 3, "cúbica": 3}.get(str(modelo_regr).lower(), 2)
-    if len(x) <= grau:
-        raise ValueError(f"O modelo selecionado exige pelo menos {grau + 1} pontos.")
+    modelo = _modelo_nome(modelo_regr)
 
-    coef = np.polyfit(x, y, grau)
-    pol = np.poly1d(coef)
-    y_pred = pol(x)
+    if modelo in ["linear", "quadratica", "cubica"]:
+        grau = {"linear": 1, "quadratica": 2, "cubica": 3}[modelo]
+        if len(x) <= grau:
+            raise ValueError(f"O modelo {modelo} exige pelo menos {grau + 1} pontos.")
+        coef = np.polyfit(x, y, grau)
+        pol = np.poly1d(coef)
+        y_pred = pol(x)
+        pred_func = lambda z: np.poly1d(coef)(z)
+        if grau == 1:
+            eq = f"y = {coef[1]:.4f} {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x"
+            modelo_nome = "Linear"
+        elif grau == 2:
+            eq = f"y = {coef[2]:.4f} {'+' if coef[1] >= 0 else '-'} {abs(coef[1]):.4f}x {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x²"
+            modelo_nome = "Quadrática"
+        else:
+            eq = f"y = {coef[3]:.4f} {'+' if coef[2] >= 0 else '-'} {abs(coef[2]):.4f}x {'+' if coef[1] >= 0 else '-'} {abs(coef[1]):.4f}x² {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x³"
+            modelo_nome = "Cúbica"
+    elif modelo == "exponencial":
+        if np.any(y <= 0):
+            raise ValueError("A regressão exponencial exige produtividades maiores que zero.")
+        b, loga = np.polyfit(x, np.log(y), 1)
+        a = float(np.exp(loga))
+        y_pred = a * np.exp(b * x)
+        pred_func = lambda z: a * np.exp(b * np.array(z))
+        eq = f"y = {a:.4f}e^({b:.4f}x)"
+        modelo_nome = "Exponencial"
+        coef = np.array([a, b])
+    elif modelo == "logaritmica":
+        if np.any(x <= 0):
+            raise ValueError("A regressão logarítmica exige doses maiores que zero. Evite dose 0 ou use outro modelo.")
+        b, a = np.polyfit(np.log(x), y, 1)
+        y_pred = a + b * np.log(x)
+        pred_func = lambda z: a + b * np.log(np.array(z))
+        eq = f"y = {a:.4f} {'+' if b >= 0 else '-'} {abs(b):.4f}ln(x)"
+        modelo_nome = "Logarítmica"
+        coef = np.array([a, b])
+    else:
+        raise ValueError("Modelo de regressão inválido.")
+
     ss_res = float(np.sum((y - y_pred) ** 2))
     ss_tot = float(np.sum((y - np.mean(y)) ** 2))
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
 
     x_min, x_max = float(np.min(x)), float(np.max(x))
-    y_min_d, y_max_d = float(np.min(y)), float(np.max(y))
     dx = (x_max - x_min) or 1.0
-    dy = (y_max_d - y_min_d) or 1.0
-    x_plot = np.linspace(x_min, x_max, 300)
-    y_plot = pol(x_plot)
+    x_plot = np.linspace(x_min, x_max, 500)
+    y_plot = np.asarray(pred_func(x_plot), dtype=float)
 
-    x_otimo = y_otimo = None
-    if grau == 2 and coef[0] != 0:
-        xo = -coef[1] / (2 * coef[0])
-        if np.isfinite(xo):
-            x_otimo = float(xo)
-            y_otimo = float(pol(x_otimo))
+    # Dose ótima: máximo estimado dentro do intervalo observado, válido também para cúbica,
+    # exponencial e logarítmica. Para modelos monotônicos, o ótimo será uma das extremidades.
+    idx_otimo = int(np.nanargmax(y_plot))
+    x_otimo = float(x_plot[idx_otimo])
+    y_otimo = float(y_plot[idx_otimo])
 
-    # Gráfico mais limpo para laudo: visual leve, curva verde, ponto ótimo destacado e sem legenda pesada.
     fig, ax = plt.subplots(figsize=(9.2, 5.4), dpi=150)
     fig.patch.set_facecolor('white')
     ax.set_facecolor('#fbfdfb')
-
     ax.plot(x_plot, y_plot, color='#2d7244', linewidth=3.0, solid_capstyle='round', label='Curva ajustada', zorder=3)
     ax.scatter(x, y, s=78, color='#0f172a', edgecolor='white', linewidth=1.5, label='Dados observados', zorder=4)
 
-    y_all = np.r_[y, y_plot]
-    if y_otimo is not None:
-        y_all = np.r_[y_all, y_otimo]
-    y_min, y_max = float(np.min(y_all)), float(np.max(y_all))
-    y_pad = (y_max - y_min) * 0.16 if y_max > y_min else 1.0
+    y_all = np.r_[y, y_plot, y_otimo]
+    y_min, y_max = float(np.nanmin(y_all)), float(np.nanmax(y_all))
+    dy = (y_max - y_min) or 1.0
     ax.set_xlim(x_min - dx * 0.05, x_max + dx * 0.05)
-    ax.set_ylim(y_min - y_pad, y_max + y_pad)
+    ax.set_ylim(y_min - dy * 0.16, y_max + dy * 0.18)
 
-    if x_otimo is not None:
-        ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), linewidth=1.4, zorder=1)
-        ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=260, edgecolor='white', linewidth=1.1, zorder=5)
-        ax.annotate(
-            f"Dose ótima: {x_otimo:.2f}\nProd. ótima: {y_otimo:.2f}",
-            xy=(x_otimo, y_otimo),
-            xytext=(14, 18),
-            textcoords='offset points',
-            fontsize=10.5,
-            fontweight='bold',
-            color='#1b3c28',
-            bbox=dict(boxstyle='round,pad=0.45', fc='white', ec='#dcf1e1', lw=1.2, alpha=0.96),
-            arrowprops=dict(arrowstyle='->', color='#2d7244', lw=1.2),
-            zorder=6
-        )
-
+    ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), linewidth=1.4, zorder=1)
+    ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=260, edgecolor='white', linewidth=1.1, zorder=5)
+    ax.annotate(
+        f"Dose ótima: {_fmt2(x_otimo)}\nProd. ótima: {_fmt2(y_otimo)}",
+        xy=(x_otimo, y_otimo), xytext=(14, 18), textcoords='offset points',
+        fontsize=10.5, fontweight='bold', color='#1b3c28',
+        bbox=dict(boxstyle='round,pad=0.45', fc='white', ec='#dcf1e1', lw=1.2, alpha=0.96),
+        arrowprops=dict(arrowstyle='->', color='#2d7244', lw=1.2), zorder=6
+    )
     ax.set_title('Regressão direta para dose ótima', fontsize=15, fontweight='bold', color='#0f172a', pad=14)
     ax.set_xlabel('Dose', fontsize=11.5, fontweight='bold', color='#334155')
     ax.set_ylabel('Produtividade', fontsize=11.5, fontweight='bold', color='#334155')
     ax.grid(True, which='major', color='#e2e8f0', linewidth=1, linestyle='-')
     ax.set_axisbelow(True)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#cbd5e1')
-    ax.spines['bottom'].set_color('#cbd5e1')
+    ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#cbd5e1'); ax.spines['bottom'].set_color('#cbd5e1')
     ax.tick_params(colors='#475569', labelsize=10)
     ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0', framealpha=0.96, fontsize=10)
     fig.tight_layout()
@@ -590,34 +624,15 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
     fig.savefig(b_svg, format='svg', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
 
-    if grau == 1:
-        eq = f"y = {coef[1]:.4f} {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x"
-        modelo_nome = "Linear"
-    elif grau == 2:
-        eq = f"y = {coef[2]:.4f} {'+' if coef[1] >= 0 else '-'} {abs(coef[1]):.4f}x {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x²"
-        modelo_nome = "Quadrática"
-    else:
-        eq = f"y = {coef[3]:.4f} {'+' if coef[2] >= 0 else '-'} {abs(coef[2]):.4f}x {'+' if coef[1] >= 0 else '-'} {abs(coef[1]):.4f}x² {'+' if coef[0] >= 0 else '-'} {abs(coef[0]):.4f}x³"
-        modelo_nome = "Cúbica"
-
-    res = {
-        "status": "sucesso",
-        "tipo": "regressao_direta",
-        "modelo": modelo_nome,
-        "equacao": eq,
-        "r2": f"{r2:.4f}",
+    return {
+        "status": "sucesso", "tipo": "regressao_direta", "modelo": modelo_nome,
+        "equacao": eq, "r2": f"{r2:.4f}",
+        "dose_otima": _fmt2(x_otimo), "resposta_otima": _fmt2(y_otimo), "produtividade_otima": _fmt2(y_otimo),
         "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'),
         "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'),
         "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'),
         "pontos": [{"Dose": round(float(a), 4), "Produtividade": round(float(b), 4), "Estimado": round(float(c), 4)} for a, b, c in zip(x, y, y_pred)]
     }
-    if x_otimo is not None:
-        res.update({
-            "dose_otima": f"{x_otimo:.2f}",
-            "resposta_otima": f"{y_otimo:.2f}",
-            "produtividade_otima": f"{y_otimo:.2f}"
-        })
-    return res
 
 @app.post("/api/analise/regressao-direta")
 async def regressao_direta(file: UploadFile = File(None), doses: str = Form(""), produtividades: str = Form(""), modelo_regr: str = Form("quadratica")):
