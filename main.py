@@ -30,6 +30,22 @@ def calcular_f_tab(gl_num, gl_den, alpha=0.95):
         return round(stats.f.ppf(alpha, gl_num, gl_den), 2)
     return "-"
 
+def formatar_f_calc(valor):
+    """Formata F calculado: 2 casas decimais; científica somente em valores extremos."""
+    if valor in ["-", None]:
+        return "-"
+    try:
+        v = float(valor)
+    except Exception:
+        return valor
+    if np.isnan(v) or np.isinf(v):
+        return "-"
+    if v == 0:
+        return "0,00"
+    if abs(v) >= 1e6 or abs(v) <= 1e-5:
+        return f"{v:.2e}".replace(".", ",")
+    return f"{v:.2f}".replace(".", ",")
+
 def aplicar_letras(medias_series, dms_val=None, duncan_dict=None):
     trats = list(medias_series.index)
     vals = list(medias_series.values)
@@ -97,9 +113,9 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             p_col = 1 - stats.f.cdf(f_col, gl_col, gl_res)
             
             anova = [
-                {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                {"FV": "Linhas", "GL": gl_linha, "SQ": round(sq_linha,2), "QM": round(qm_linha,2), "F Calc": round(f_linha,2), "F Tab": calcular_f_tab(gl_linha, gl_res), "Sig": determinar_sig_texto(p_linha, gl_linha, gl_res)},
-                {"FV": "Colunas", "GL": gl_col, "SQ": round(sq_col,2), "QM": round(qm_col,2), "F Calc": round(f_col,2), "F Tab": calcular_f_tab(gl_col, gl_res), "Sig": determinar_sig_texto(p_col, gl_col, gl_res)},
+                {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
+                {"FV": "Linhas", "GL": gl_linha, "SQ": round(sq_linha,2), "QM": round(qm_linha,2), "F Calc": formatar_f_calc(f_linha), "F Tab": calcular_f_tab(gl_linha, gl_res), "Sig": determinar_sig_texto(p_linha, gl_linha, gl_res)},
+                {"FV": "Colunas", "GL": gl_col, "SQ": round(sq_col,2), "QM": round(qm_col,2), "F Calc": formatar_f_calc(f_col), "F Tab": calcular_f_tab(gl_col, gl_res), "Sig": determinar_sig_texto(p_col, gl_col, gl_res)},
                 {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
                 {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
@@ -118,8 +134,8 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
                 p_bloc = 1 - stats.f.cdf(f_bloc, gl_bloc, gl_res)
                 anova = [
-                    {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
+                    {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
+                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
                     {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
                     {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
@@ -130,7 +146,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 f_trat = qm_trat/qm_res if qm_res>0 else 0
                 p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
                 anova = [
-                    {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
+                    {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
                     {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
                     {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
@@ -179,8 +195,8 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_res) if gl_desvio > 0 else np.nan
             
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": formatar_f_calc(f_reg) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": formatar_f_calc(f_desvio) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
                 {"FV": "Total dos Tratamentos", "GL": gl_trat, "SQ": round(sq_trat, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title("Ajuste de Regressão"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
@@ -244,11 +260,11 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         p_inter = 1 - stats.f.cdf((sq_inter/gl_inter)/qm_res if qm_res>0 else 0, gl_inter, gl_res)
 
         anova = [
-            {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": round(f_trat,2), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-            {"FV": "  Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(sq_a/gl_a,2), "F Calc": round((sq_a/gl_a)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_a/gl_a)/qm_res if qm_res>0 else 0, gl_a, gl_res), gl_a, gl_res)},
-            {"FV": "  Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(sq_b/gl_b,2), "F Calc": round((sq_b/gl_b)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_b/gl_b)/qm_res if qm_res>0 else 0, gl_b, gl_res), gl_b, gl_res)},
-            {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": round((sq_inter/gl_inter)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_res)},
-            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": round((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0,2), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0, gl_bloc, gl_res), gl_bloc, gl_res)},
+            {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
+            {"FV": "  Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(sq_a/gl_a,2), "F Calc": formatar_f_calc((sq_a/gl_a)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_a/gl_a)/qm_res if qm_res>0 else 0, gl_a, gl_res), gl_a, gl_res)},
+            {"FV": "  Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(sq_b/gl_b,2), "F Calc": formatar_f_calc((sq_b/gl_b)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_b/gl_b)/qm_res if qm_res>0 else 0, gl_b, gl_res), gl_b, gl_res)},
+            {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": formatar_f_calc((sq_inter/gl_inter)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_res)},
+            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": formatar_f_calc((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0, gl_bloc, gl_res), gl_bloc, gl_res)},
             {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
         ]
@@ -307,8 +323,8 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_res) if gl_desvio > 0 else np.nan
 
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": formatar_f_calc(f_reg) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_res), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_res)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": formatar_f_calc(f_desvio) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_res), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_res)},
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title(f"Ajuste {modelo_regr.capitalize()} - Fator {fator}"); ax.grid(True, linestyle='--', alpha=0.6); ax.legend()
@@ -383,12 +399,12 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         p_inter = 1 - stats.f.cdf(f_inter, gl_inter, gl_erro_b)
 
         anova = [
-            {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": round(f_a,2), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_a, gl_a, gl_erro_a), gl_a, gl_erro_a)},
-            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": round(f_bloc,2), "F Tab": calcular_f_tab(gl_bloc, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_bloc, gl_bloc, gl_erro_a), gl_bloc, gl_erro_a)},
+            {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": formatar_f_calc(f_a), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_a, gl_a, gl_erro_a), gl_a, gl_erro_a)},
+            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_bloc, gl_bloc, gl_erro_a), gl_bloc, gl_erro_a)},
             {"FV": "Erro A (Parcela)", "GL": gl_erro_a, "SQ": round(sq_erro_a,2), "QM": round(qm_erro_a,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Parcelas (Subtotal)", "GL": gl_parcela_total, "SQ": round(sq_parcela_total,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"},
-            {"FV": "Fator B (Subparcela)", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": round(f_b,2), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(1-stats.f.cdf(f_b, gl_b, gl_erro_b), gl_b, gl_erro_b)},
-            {"FV": "Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": round(f_inter,2), "F Tab": calcular_f_tab(gl_inter, gl_erro_b), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_erro_b)},
+            {"FV": "Fator B (Subparcela)", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": formatar_f_calc(f_b), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(1-stats.f.cdf(f_b, gl_b, gl_erro_b), gl_b, gl_erro_b)},
+            {"FV": "Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": formatar_f_calc(f_inter), "F Tab": calcular_f_tab(gl_inter, gl_erro_b), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_erro_b)},
             {"FV": "Erro B (Subparcela)", "GL": gl_erro_b, "SQ": round(sq_erro_b,2), "QM": round(qm_erro_b,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
         ]
@@ -449,8 +465,8 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             p_desvio = 1 - stats.f.cdf(f_desvio, gl_desvio, gl_err_atual) if gl_desvio > 0 else np.nan
 
             anova_reg = [
-                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": round(f_reg, 2) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_err_atual), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_err_atual)},
-                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": round(f_desvio, 2) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_err_atual)},
+                {"FV": f"Regressão ({modelo_regr.capitalize()})", "GL": gl_reg, "SQ": round(sq_reg_raw, 2), "QM": round(qm_reg, 2) if gl_reg>0 else "-", "F Calc": formatar_f_calc(f_reg) if gl_reg>0 else "-", "F Tab": calcular_f_tab(gl_reg, gl_err_atual), "Sig": determinar_sig_texto(p_reg, gl_reg, gl_err_atual)},
+                {"FV": "Desvios da Regressão", "GL": gl_desvio, "SQ": round(sq_desvio_raw, 2), "QM": round(qm_desvio, 2) if gl_desvio>0 else "-", "F Calc": formatar_f_calc(f_desvio) if gl_desvio>0 else "-", "F Tab": calcular_f_tab(gl_desvio, gl_err_atual), "Sig": determinar_sig_texto(p_desvio, gl_desvio, gl_err_atual)},
                 {"FV": f"Total do Fator {fator}", "GL": gl_fator_real, "SQ": round(sq_trat_raw, 2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
             ]
             ax.set_title(f"Ajuste Regressão - Fator {fator}"); ax.grid(True); ax.legend()
