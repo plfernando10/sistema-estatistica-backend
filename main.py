@@ -13,6 +13,45 @@ import base64
 app = FastAPI(title="Solver Estatística Experimental API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+# ================= VALIDAÇÃO DE ESTRUTURA DOS ARQUIVOS (v10) =================
+def _normalizar_nome_coluna(col):
+    import unicodedata
+    txt = str(col).strip().lower()
+    txt = ''.join(ch for ch in unicodedata.normalize('NFD', txt) if unicodedata.category(ch) != 'Mn')
+    return txt
+
+def validar_estrutura_entrada(df, modulo, tipo_delineamento=None):
+    cols = list(df.columns)
+    nomes = [_normalizar_nome_coluna(c) for c in cols]
+    n = len(cols)
+
+    def contem(*termos):
+        return any(t in c for c in nomes for t in termos)
+
+    if modulo == 'simples':
+        tipo = (tipo_delineamento or 'dbc').lower()
+        if tipo == 'dql':
+            if n != 4:
+                raise ValueError('Formato incorreto para DQL. Use as colunas: Tratamento;Linha;Coluna;Valor.')
+            if contem('fator a', 'fatora', 'fator b', 'fatorb') and contem('bloco'):
+                raise ValueError('Este arquivo parece ser de fatorial/subparcelas. Para DQL use: Tratamento;Linha;Coluna;Valor.')
+        else:
+            if n != 3:
+                esperado = 'Tratamento;Repetição;Valor' if tipo == 'dic' else 'Tratamento;Bloco;Valor'
+                raise ValueError(f'Formato incorreto para {tipo.upper()}. Use as colunas: {esperado}.')
+            if contem('fator a', 'fatora', 'fator b', 'fatorb'):
+                raise ValueError('Este arquivo parece ser de fatorial/subparcelas. Escolha o módulo correto ou use: Tratamento;Bloco;Valor.')
+
+    elif modulo in ('fatorial', 'parcelas'):
+        if n != 4:
+            nome = 'fatorial' if modulo == 'fatorial' else 'parcelas subdivididas'
+            raise ValueError(f'Formato incorreto para {nome}. Use as colunas: A;B;Bloco;Valor.')
+        if contem('tratamento', 'linha', 'coluna'):
+            raise ValueError('Este arquivo parece ser de DIC/DBC/DQL. Para fatorial ou subparcelas use: A;B;Bloco;Valor.')
+
+    return True
+
+
 def determinar_sig_texto(p_valor, gl_num, gl_den):
     if pd.isna(p_valor) or gl_num <= 0 or gl_den <= 0 or p_valor > 1: return "-" if gl_num <= 0 else "ns"
     if p_valor < 0.01: return "1% (**)"
@@ -321,6 +360,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
         except: df = pd.read_csv(io.BytesIO(content), sep=',', decimal='.')
         
         cols = list(df.columns)
+        validar_estrutura_entrada(df, 'simples', tipo_delineamento)
         if tipo_delineamento == "dql": df.rename(columns={cols[0]: 'Trat', cols[1]: 'Linha', cols[2]: 'Coluna', cols[3]: 'Valor'}, inplace=True)
         else: df.rename(columns={cols[0]: 'Trat', cols[1]: 'Bloco', cols[2]: 'Valor'}, inplace=True)
             
@@ -450,6 +490,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
+    except ValueError as e: raise HTTPException(status_code=400, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 # ================= MÓDULO 2: FATORIAL DUPLO =================
@@ -460,6 +501,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         try: df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
         except: df = pd.read_csv(io.BytesIO(content), sep=',', decimal='.')
         cols = list(df.columns)
+        validar_estrutura_entrada(df, 'fatorial')
         df.rename(columns={cols[0]: 'A', cols[1]: 'B', cols[2]: 'Bloco', cols[3]: 'Valor'}, inplace=True)
         df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace(',', '.'), errors='coerce')
         
@@ -566,6 +608,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
+    except ValueError as e: raise HTTPException(status_code=400, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 # ================= MÓDULO 3: PARCELAS SUBDIVIDIDAS =================
@@ -576,6 +619,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         try: df = pd.read_csv(io.BytesIO(content), sep=';', decimal=',')
         except: df = pd.read_csv(io.BytesIO(content), sep=',', decimal='.')
         cols = list(df.columns)
+        validar_estrutura_entrada(df, 'parcelas')
         df.rename(columns={cols[0]: 'A', cols[1]: 'B', cols[2]: 'Bloco', cols[3]: 'Valor'}, inplace=True)
         df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace(',', '.'), errors='coerce')
         
@@ -695,6 +739,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
             return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
 
+    except ValueError as e: raise HTTPException(status_code=400, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 
