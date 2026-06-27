@@ -77,13 +77,96 @@ def formatar_f_calc(valor):
         v = float(valor)
     except Exception:
         return valor
-    if np.isnan(v) or np.isinf(v):
+    if np.isnan(v):
         return "-"
+    if np.isinf(v):
+        return "∞"
     if v == 0:
         return "0,00"
     if abs(v) >= 1e6 or abs(v) <= 1e-5:
         return f"{v:.2e}".replace(".", ",")
     return f"{v:.2f}".replace(".", ",")
+
+
+def calcular_f_p(qm_fonte, qm_erro, gl_num, gl_den):
+    """Calcula F e p-valor de modo robusto, inclusive quando o erro experimental é zero."""
+    try:
+        qm_fonte = float(qm_fonte)
+        qm_erro = float(qm_erro)
+    except Exception:
+        return np.nan, np.nan
+    if gl_num <= 0 or gl_den <= 0 or not np.isfinite(qm_fonte):
+        return np.nan, np.nan
+    if qm_erro <= 0 or not np.isfinite(qm_erro):
+        if qm_fonte > 0:
+            return np.inf, 0.0
+        return 0.0, 1.0
+    f_calc = qm_fonte / qm_erro
+    p_valor = 1 - stats.f.cdf(f_calc, gl_num, gl_den)
+    return f_calc, p_valor
+
+
+def _nivel_key(valor):
+    """Chave textual estável para comparar níveis digitados como 1, '1' ou 1.0."""
+    txt = str(valor).strip()
+    num = _safe_float(txt, None)
+    if num is not None:
+        return f"num:{num:.12g}"
+    return f"txt:{txt.lower()}"
+
+
+def localizar_nivel_indice(indice, valor):
+    if valor is None or str(valor).strip() == "":
+        return None
+    alvo = _nivel_key(valor)
+    for item in indice:
+        if _nivel_key(item) == alvo:
+            return item
+    return None
+
+
+def validar_completude_balanceamento(df, modulo, tipo_delineamento=None):
+    """Impede ANOVA com matriz manual incompleta ou estrutura desbalanceada."""
+    if df['Valor'].isna().any():
+        raise ValueError('Há valores ausentes ou não numéricos na coluna Valor. Preencha toda a matriz antes de processar.')
+    if len(df) == 0:
+        raise ValueError('Nenhum dado válido foi encontrado.')
+
+    def checar_cruzamento(colunas, esperados, nome):
+        obs = df.groupby(colunas, dropna=False).size()
+        if (obs != 1).any():
+            raise ValueError(f'O delineamento {nome} exige exatamente 1 valor para cada combinação de ' + ', '.join(colunas) + '.')
+        qtd_esperada = 1
+        for col in colunas:
+            qtd_esperada *= len(esperados[col])
+        if len(obs) != qtd_esperada:
+            raise ValueError(f'Matriz incompleta para {nome}. Preencha todas as combinações de ' + ', '.join(colunas) + '.')
+
+    if modulo == 'simples':
+        tipo = (tipo_delineamento or 'dbc').lower()
+        if tipo == 'dql':
+            n_trat = df['Trat'].nunique()
+            n_linha = df['Linha'].nunique()
+            n_col = df['Coluna'].nunique()
+            if not (n_trat == n_linha == n_col):
+                raise ValueError('No DQL, o número de tratamentos, linhas e colunas deve ser igual.')
+            checar_cruzamento(['Linha', 'Coluna'], {'Linha': df['Linha'].unique(), 'Coluna': df['Coluna'].unique()}, 'DQL')
+            cont_trat = df.groupby('Trat', dropna=False).size()
+            if (cont_trat != n_trat).any():
+                raise ValueError('No DQL, cada tratamento deve aparecer exatamente uma vez em cada linha e coluna.')
+            for linha, sub in df.groupby('Linha', dropna=False):
+                if sub['Trat'].nunique() != n_trat:
+                    raise ValueError('No DQL, cada linha deve conter todos os tratamentos uma única vez.')
+            for coluna, sub in df.groupby('Coluna', dropna=False):
+                if sub['Trat'].nunique() != n_trat:
+                    raise ValueError('No DQL, cada coluna deve conter todos os tratamentos uma única vez.')
+        else:
+            nome = 'DIC' if tipo == 'dic' else 'DBC'
+            checar_cruzamento(['Trat', 'Bloco'], {'Trat': df['Trat'].unique(), 'Bloco': df['Bloco'].unique()}, nome)
+    elif modulo in ('fatorial', 'parcelas'):
+        nome = 'fatorial' if modulo == 'fatorial' else 'parcelas subdivididas'
+        checar_cruzamento(['A', 'B', 'Bloco'], {'A': df['A'].unique(), 'B': df['B'].unique(), 'Bloco': df['Bloco'].unique()}, nome)
+    return True
 
 def aplicar_letras(medias_series, dms_val=None, duncan_dict=None):
     trats = list(medias_series.index)
@@ -365,6 +448,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
         else: df.rename(columns={cols[0]: 'Trat', cols[1]: 'Bloco', cols[2]: 'Valor'}, inplace=True)
             
         df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace(',', '.'), errors='coerce')
+        validar_completude_balanceamento(df, 'simples', tipo_delineamento)
         mg = df['Valor'].mean()
         sq_tot = ((df['Valor'] - mg)**2).sum()
         n_total = len(df)
@@ -382,12 +466,9 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             qm_trat, qm_linha, qm_col = sq_trat / gl_trat, sq_linha / gl_linha, sq_col / gl_col
             qm_res = sq_res / gl_res if gl_res > 0 else 0
             
-            f_trat = qm_trat/qm_res if qm_res>0 else 0
-            f_linha = qm_linha/qm_res if qm_res>0 else 0
-            f_col = qm_col/qm_res if qm_res>0 else 0
-            p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
-            p_linha = 1 - stats.f.cdf(f_linha, gl_linha, gl_res)
-            p_col = 1 - stats.f.cdf(f_col, gl_col, gl_res)
+            f_trat, p_trat = calcular_f_p(qm_trat, qm_res, gl_trat, gl_res)
+            f_linha, p_linha = calcular_f_p(qm_linha, qm_res, gl_linha, gl_res)
+            f_col, p_col = calcular_f_p(qm_col, qm_res, gl_col, gl_res)
             
             anova = [
                 {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
@@ -407,12 +488,12 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 gl_bloc = nR - 1
                 gl_res = gl_tot - gl_trat - gl_bloc
                 qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
-                f_trat, f_bloc = qm_trat/qm_res if qm_res>0 else 0, (sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0
-                p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
-                p_bloc = 1 - stats.f.cdf(f_bloc, gl_bloc, gl_res)
+                qm_bloc = sq_bloc/gl_bloc if gl_bloc > 0 else 0
+                f_trat, p_trat = calcular_f_p(qm_trat, qm_res, gl_trat, gl_res)
+                f_bloc, p_bloc = calcular_f_p(qm_bloc, qm_res, gl_bloc, gl_res)
                 anova = [
                     {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
+                    {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
                     {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
                     {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
                 ]
@@ -420,8 +501,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
                 sq_res = max(0, sq_tot - sq_trat)
                 gl_res = gl_tot - gl_trat
                 qm_trat, qm_res = sq_trat/gl_trat, sq_res/gl_res if gl_res>0 else 0
-                f_trat = qm_trat/qm_res if qm_res>0 else 0
-                p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
+                f_trat, p_trat = calcular_f_p(qm_trat, qm_res, gl_trat, gl_res)
                 anova = [
                     {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
                     {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
@@ -484,11 +564,12 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett" in tipo_teste:
-            if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
-            media_test = medias[testemunha]
+            testemunha_idx = localizar_nivel_indice(medias.index, testemunha)
+            if testemunha_idx is None: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada. Use exatamente um dos níveis: {', '.join(map(str, medias.index))}."}
+            media_test = medias[testemunha_idx]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (nT - 1))), gl_res) * ep * np.sqrt(2)
-            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
-            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
+            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha_idx]
+            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": str(testemunha_idx), "media_testemunha": round(media_test, 2), "resultados": res}
 
     except ValueError as e: raise HTTPException(status_code=400, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
@@ -504,6 +585,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         validar_estrutura_entrada(df, 'fatorial')
         df.rename(columns={cols[0]: 'A', cols[1]: 'B', cols[2]: 'Bloco', cols[3]: 'Valor'}, inplace=True)
         df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace(',', '.'), errors='coerce')
+        validar_completude_balanceamento(df, 'fatorial')
         
         nA, nB, nR = len(df['A'].unique()), len(df['B'].unique()), len(df['Bloco'].unique())
         mg = df['Valor'].mean()
@@ -522,16 +604,22 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         gl_res = gl_tot - gl_a - gl_b - gl_inter - gl_bloc
         qm_res = sq_res/gl_res if gl_res > 0 else 0
         
-        f_trat = qm_trat / qm_res if qm_res > 0 else 0
-        p_trat = 1 - stats.f.cdf(f_trat, gl_trat, gl_res)
-        p_inter = 1 - stats.f.cdf((sq_inter/gl_inter)/qm_res if qm_res>0 else 0, gl_inter, gl_res)
+        qm_a = sq_a/gl_a if gl_a > 0 else 0
+        qm_b = sq_b/gl_b if gl_b > 0 else 0
+        qm_inter = sq_inter/gl_inter if gl_inter > 0 else 0
+        qm_bloc = sq_bloc/gl_bloc if gl_bloc > 0 else 0
+        f_trat, p_trat = calcular_f_p(qm_trat, qm_res, gl_trat, gl_res)
+        f_a, p_a = calcular_f_p(qm_a, qm_res, gl_a, gl_res)
+        f_b, p_b = calcular_f_p(qm_b, qm_res, gl_b, gl_res)
+        f_inter, p_inter = calcular_f_p(qm_inter, qm_res, gl_inter, gl_res)
+        f_bloc, p_bloc = calcular_f_p(qm_bloc, qm_res, gl_bloc, gl_res)
 
         anova = [
             {"FV": "Tratamentos", "GL": gl_trat, "SQ": round(sq_trat,2), "QM": round(qm_trat,2), "F Calc": formatar_f_calc(f_trat), "F Tab": calcular_f_tab(gl_trat, gl_res), "Sig": determinar_sig_texto(p_trat, gl_trat, gl_res)},
-            {"FV": "  Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(sq_a/gl_a,2), "F Calc": formatar_f_calc((sq_a/gl_a)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_a/gl_a)/qm_res if qm_res>0 else 0, gl_a, gl_res), gl_a, gl_res)},
-            {"FV": "  Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(sq_b/gl_b,2), "F Calc": formatar_f_calc((sq_b/gl_b)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_b/gl_b)/qm_res if qm_res>0 else 0, gl_b, gl_res), gl_b, gl_res)},
-            {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(sq_inter/gl_inter,2), "F Calc": formatar_f_calc((sq_inter/gl_inter)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_res)},
-            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(sq_bloc/gl_bloc,2), "F Calc": formatar_f_calc((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(1-stats.f.cdf((sq_bloc/gl_bloc)/qm_res if qm_res>0 else 0, gl_bloc, gl_res), gl_bloc, gl_res)},
+            {"FV": "  Fator A", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": formatar_f_calc(f_a), "F Tab": calcular_f_tab(gl_a, gl_res), "Sig": determinar_sig_texto(p_a, gl_a, gl_res)},
+            {"FV": "  Fator B", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": formatar_f_calc(f_b), "F Tab": calcular_f_tab(gl_b, gl_res), "Sig": determinar_sig_texto(p_b, gl_b, gl_res)},
+            {"FV": "  Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": formatar_f_calc(f_inter), "F Tab": calcular_f_tab(gl_inter, gl_res), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_res)},
+            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_res), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_res)},
             {"FV": "Resíduo", "GL": gl_res, "SQ": round(sq_res,2), "QM": round(qm_res,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
         ]
@@ -548,9 +636,9 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
         ep = np.sqrt(qm_res/(nB*nR)) if fator == 'A' else np.sqrt(qm_res/(nA*nR))
         medias = df.groupby(fator)['Valor'].mean().sort_values(ascending=False)
 
-        f_calc_fator = (sq_a/gl_a)/qm_res if fator == 'A' else (sq_b/gl_b)/qm_res
+        f_calc_fator = f_a if fator == 'A' else f_b
         gl_num_fator = gl_a if fator == 'A' else gl_b
-        p_fator = 1 - stats.f.cdf(f_calc_fator, gl_num_fator, gl_res)
+        p_fator = p_a if fator == 'A' else p_b
         alpha = 0.01 if p_fator < 0.01 else 0.05
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
@@ -602,11 +690,12 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett_" in tipo_teste:
-            if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
-            media_test = medias[testemunha]
+            testemunha_idx = localizar_nivel_indice(medias.index, testemunha)
+            if testemunha_idx is None: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada. Use exatamente um dos níveis: {', '.join(map(str, medias.index))}."}
+            media_test = medias[testemunha_idx]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (n_niveis - 1))), gl_res) * ep * np.sqrt(2)
-            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
-            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
+            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha_idx]
+            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": str(testemunha_idx), "media_testemunha": round(media_test, 2), "resultados": res}
 
     except ValueError as e: raise HTTPException(status_code=400, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
@@ -622,6 +711,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         validar_estrutura_entrada(df, 'parcelas')
         df.rename(columns={cols[0]: 'A', cols[1]: 'B', cols[2]: 'Bloco', cols[3]: 'Valor'}, inplace=True)
         df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace(',', '.'), errors='coerce')
+        validar_completude_balanceamento(df, 'parcelas')
         
         nA, nB, nR = len(df['A'].unique()), len(df['B'].unique()), len(df['Bloco'].unique())
         mg, n_total = df['Valor'].mean(), len(df)
@@ -649,18 +739,17 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
         qm_inter = sq_inter / gl_inter
         qm_erro_b = sq_erro_b / gl_erro_b if gl_erro_b > 0 else 0
         
-        f_a = qm_a / qm_erro_a if qm_erro_a > 0 else 0
-        f_bloc = qm_bloc / qm_erro_a if qm_erro_a > 0 else 0
-        f_b = qm_b / qm_erro_b if qm_erro_b > 0 else 0
-        f_inter = qm_inter / qm_erro_b if qm_erro_b > 0 else 0
-        p_inter = 1 - stats.f.cdf(f_inter, gl_inter, gl_erro_b)
+        f_a, p_a = calcular_f_p(qm_a, qm_erro_a, gl_a, gl_erro_a)
+        f_bloc, p_bloc = calcular_f_p(qm_bloc, qm_erro_a, gl_bloc, gl_erro_a)
+        f_b, p_b = calcular_f_p(qm_b, qm_erro_b, gl_b, gl_erro_b)
+        f_inter, p_inter = calcular_f_p(qm_inter, qm_erro_b, gl_inter, gl_erro_b)
 
         anova = [
-            {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": formatar_f_calc(f_a), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_a, gl_a, gl_erro_a), gl_a, gl_erro_a)},
-            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_erro_a), "Sig": determinar_sig_texto(1-stats.f.cdf(f_bloc, gl_bloc, gl_erro_a), gl_bloc, gl_erro_a)},
+            {"FV": "Fator A (Parcela)", "GL": gl_a, "SQ": round(sq_a,2), "QM": round(qm_a,2), "F Calc": formatar_f_calc(f_a), "F Tab": calcular_f_tab(gl_a, gl_erro_a), "Sig": determinar_sig_texto(p_a, gl_a, gl_erro_a)},
+            {"FV": "Blocos", "GL": gl_bloc, "SQ": round(sq_bloc,2), "QM": round(qm_bloc,2), "F Calc": formatar_f_calc(f_bloc), "F Tab": calcular_f_tab(gl_bloc, gl_erro_a), "Sig": determinar_sig_texto(p_bloc, gl_bloc, gl_erro_a)},
             {"FV": "Erro A (Parcela)", "GL": gl_erro_a, "SQ": round(sq_erro_a,2), "QM": round(qm_erro_a,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Parcelas (Subtotal)", "GL": gl_parcela_total, "SQ": round(sq_parcela_total,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"},
-            {"FV": "Fator B (Subparcela)", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": formatar_f_calc(f_b), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(1-stats.f.cdf(f_b, gl_b, gl_erro_b), gl_b, gl_erro_b)},
+            {"FV": "Fator B (Subparcela)", "GL": gl_b, "SQ": round(sq_b,2), "QM": round(qm_b,2), "F Calc": formatar_f_calc(f_b), "F Tab": calcular_f_tab(gl_b, gl_erro_b), "Sig": determinar_sig_texto(p_b, gl_b, gl_erro_b)},
             {"FV": "Interação AxB", "GL": gl_inter, "SQ": round(sq_inter,2), "QM": round(qm_inter,2), "F Calc": formatar_f_calc(f_inter), "F Tab": calcular_f_tab(gl_inter, gl_erro_b), "Sig": determinar_sig_texto(p_inter, gl_inter, gl_erro_b)},
             {"FV": "Erro B (Subparcela)", "GL": gl_erro_b, "SQ": round(sq_erro_b,2), "QM": round(qm_erro_b,2), "F Calc": "-", "F Tab": "-", "Sig": "-"},
             {"FV": "Total", "GL": gl_tot, "SQ": round(sq_tot,2), "QM": "-", "F Calc": "-", "F Tab": "-", "Sig": "-"}
@@ -685,7 +774,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
 
         f_calc_fator = f_a if fator == 'A' else f_b
         gl_num_fator = gl_a if fator == 'A' else gl_b
-        p_fator = 1 - stats.f.cdf(f_calc_fator, gl_num_fator, gl_err_atual)
+        p_fator = p_a if fator == 'A' else p_b
         alpha = 0.01 if p_fator < 0.01 else 0.05
         alpha_txt = "1%" if p_fator < 0.01 else "5%"
 
@@ -733,11 +822,12 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             return {"status": "sucesso", "tipo": "duncan", "nome_teste": "Duncan", "alpha_txt": alpha_txt, "alcances": rp_duncan, "tabela": aplicar_letras(medias, duncan_dict=rp_duncan)}
 
         if "dunnett_" in tipo_teste:
-            if not testemunha or testemunha not in medias.index: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada."}
-            media_test = medias[testemunha]
+            testemunha_idx = localizar_nivel_indice(medias.index, testemunha)
+            if testemunha_idx is None: return {"status": "erro", "mensagem": f"Testemunha '{testemunha}' não encontrada. Use exatamente um dos níveis: {', '.join(map(str, medias.index))}."}
+            media_test = medias[testemunha_idx]
             dms_dunnett = stats.t.ppf(1 - (alpha / (2 * (n_niveis - 1))), gl_err_atual) * ep * np.sqrt(2)
-            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha]
-            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": testemunha, "media_testemunha": round(media_test, 2), "resultados": res}
+            res = [{"Tratamento": str(n), "Média": round(v, 2), "Diferença": round(v - media_test, 2), "Sig": "Significativo (*)" if abs(v - media_test) >= dms_dunnett else "ns"} for n, v in medias.items() if n != testemunha_idx]
+            return {"status": "sucesso", "tipo": "dunnett", "alpha_txt": alpha_txt, "dms": round(dms_dunnett, 4), "testemunha": str(testemunha_idx), "media_testemunha": round(media_test, 2), "resultados": res}
 
     except ValueError as e: raise HTTPException(status_code=400, detail=str(e))
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
