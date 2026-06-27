@@ -187,8 +187,14 @@ def _modelo_legivel(modelo):
     }.get(str(modelo or '').lower(), str(modelo or 'Modelo'))
 
 def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
-    """Compara modelos disponíveis e recomenda o ajuste com melhor equilíbrio entre R² e parcimônia.
-    Usa R² ajustado quando possível; quando há poucos pontos, aplica pequena penalização por complexidade.
+    """Compara os modelos de regressão e sempre informa o melhor ajuste encontrado.
+
+    Critério usado:
+    1) `melhor_modelo`: maior R² observado entre os modelos válidos.
+    2) `modelo_parcimonioso`: maior R² ajustado, usado como apoio para evitar sobreajuste.
+
+    No relatório, a recomendação prioriza o melhor R² quando ele supera o modelo escolhido,
+    mas alerta o usuário para validar o sentido biológico da curva, especialmente em cúbicas.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -197,20 +203,21 @@ def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
     n = len(x)
     if n < 2:
         return None
+
     modelos = ['linear', 'quadratica', 'cubica', 'exponencial', 'logaritmica']
     params = {'linear': 2, 'quadratica': 3, 'cubica': 4, 'exponencial': 2, 'logaritmica': 2}
     ranking = []
+
     for m in modelos:
         try:
             ajuste = ajustar_modelo_regressao(x, y, m)
             r2 = float(ajuste.get('r2', np.nan))
             k = params[m]
-            # Exige pelo menos 2 graus de liberdade residuais para não premiar sobreajuste.
             if n > k + 1:
-                r2_adj = 1 - (1 - r2) * (n - 1) / (n - k)
+                r2_adj = 1 - (1 - r2) * (n - 1) / max(1, (n - k))
             else:
-                # Quando há pontos demais próximos ao número de parâmetros, o R² pode ficar artificialmente alto.
-                r2_adj = r2 - (0.12 * max(1, k - 1))
+                # Penalização informativa para modelos mais complexos quando há poucos pontos.
+                r2_adj = r2 - (0.04 * max(1, k - 1))
             ranking.append({
                 'modelo': ajuste.get('modelo', _modelo_legivel(m)),
                 'modelo_id': m,
@@ -224,38 +231,61 @@ def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
                 'modelo_id': m,
                 'erro': str(exc)
             })
-    validos = [r for r in ranking if 'r2_ajustado' in r and np.isfinite(r['r2_ajustado'])]
+
+    validos = [r for r in ranking if 'r2' in r and np.isfinite(r['r2'])]
     if not validos:
         return {'mensagem': 'Não foi possível comparar modelos alternativos com os dados informados.', 'ranking': ranking}
-    melhor = max(validos, key=lambda r: (r['r2_ajustado'], r['r2']))
-    atual_id = str(modelo_atual or 'quadratica').lower()
-    if atual_id in ['quadrática']: atual_id = 'quadratica'
-    if atual_id in ['cúbica']: atual_id = 'cubica'
-    if atual_id in ['logarítmica', 'log']: atual_id = 'logaritmica'
-    atual = next((r for r in validos if r.get('modelo_id') == atual_id), None)
-    if atual is None:
-        atual = validos[0]
-    diferenca = melhor['r2_ajustado'] - atual['r2_ajustado']
-    if melhor['modelo_id'] != atual.get('modelo_id') and (diferenca >= 0.03 or atual.get('r2', 0) < 0.75):
-        mensagem = (f"O modelo selecionado ({atual['modelo']}) não foi o mais eficiente para estes dados. "
-                    f"Recomenda-se avaliar o modelo {melhor['modelo']}, que apresentou melhor equilíbrio entre R² "
-                    f"({melhor['r2']:.4f}) e complexidade do ajuste.")
+
+    melhor_r2 = max(validos, key=lambda r: (r['r2'], r.get('r2_ajustado', -999)))
+    melhor_ajustado = max(validos, key=lambda r: (r.get('r2_ajustado', -999), r['r2']))
+
+    atual_id = str(modelo_atual or 'quadratica').lower().strip()
+    aliases = {'quadrática': 'quadratica', 'cúbica': 'cubica', 'logarítmica': 'logaritmica', 'log': 'logaritmica', 'exp': 'exponencial'}
+    atual_id = aliases.get(atual_id, atual_id)
+    atual = next((r for r in validos if r.get('modelo_id') == atual_id), None) or validos[0]
+
+    diferenca_r2 = melhor_r2['r2'] - atual['r2']
+    if melhor_r2['modelo_id'] != atual.get('modelo_id') and diferenca_r2 >= 0.001:
+        mensagem = (
+            f"O modelo selecionado ({atual['modelo']}) não foi o melhor ajuste pelos dados observados. "
+            f"Recomenda-se avaliar o modelo {melhor_r2['modelo']}, que apresentou o maior R² "
+            f"({melhor_r2['r2']:.4f}) frente ao modelo escolhido (R² = {atual['r2']:.4f}). "
+            f"Use essa recomendação junto ao sentido biológico da curva e ao intervalo experimental avaliado."
+        )
     elif atual.get('r2', 0) >= 0.90:
-        mensagem = (f"O modelo selecionado ({atual['modelo']}) apresenta excelente aderência aos dados "
-                    f"(R² = {atual['r2']:.4f}) e pode ser mantido, desde que faça sentido biologicamente.")
+        mensagem = (
+            f"O modelo selecionado ({atual['modelo']}) apresentou excelente aderência aos dados "
+            f"(R² = {atual['r2']:.4f}). No ranking de modelos avaliados, o melhor ajuste por R² foi "
+            f"{melhor_r2['modelo']} (R² = {melhor_r2['r2']:.4f})."
+        )
     elif atual.get('r2', 0) >= 0.75:
-        mensagem = (f"O modelo selecionado ({atual['modelo']}) apresenta boa aderência aos dados "
-                    f"(R² = {atual['r2']:.4f}). Ainda assim, compare a interpretação biológica com o modelo {melhor['modelo']}.")
+        mensagem = (
+            f"O modelo selecionado ({atual['modelo']}) apresentou boa aderência aos dados "
+            f"(R² = {atual['r2']:.4f}). Ainda assim, recomenda-se comparar com o modelo "
+            f"{melhor_r2['modelo']}, que foi o melhor ajuste por R²."
+        )
     else:
-        mensagem = (f"O modelo selecionado ({atual['modelo']}) apresenta baixa aderência aos dados "
-                    f"(R² = {atual['r2']:.4f}). Recomenda-se testar o modelo {melhor['modelo']} ou revisar as doses avaliadas.")
+        mensagem = (
+            f"O modelo selecionado ({atual['modelo']}) apresentou baixa aderência aos dados "
+            f"(R² = {atual['r2']:.4f}). Recomenda-se testar o modelo {melhor_r2['modelo']} "
+            f"ou revisar as doses avaliadas."
+        )
+
+    if melhor_ajustado['modelo_id'] != melhor_r2['modelo_id']:
+        mensagem += (
+            f" Como checagem de parcimônia, o modelo {melhor_ajustado['modelo']} apresentou o melhor R² ajustado "
+            f"({melhor_ajustado.get('r2_ajustado', np.nan):.4f}), o que pode ser útil quando houver poucos pontos experimentais."
+        )
+
     return {
         'modelo_atual': atual.get('modelo'),
         'r2_atual': f"{atual.get('r2', np.nan):.4f}",
-        'melhor_modelo': melhor.get('modelo'),
-        'r2_melhor': f"{melhor.get('r2', np.nan):.4f}",
+        'melhor_modelo': melhor_r2.get('modelo'),
+        'r2_melhor': f"{melhor_r2.get('r2', np.nan):.4f}",
+        'modelo_parcimonioso': melhor_ajustado.get('modelo'),
+        'r2_ajustado_parcimonioso': f"{melhor_ajustado.get('r2_ajustado', np.nan):.4f}",
         'mensagem': mensagem,
-        'ranking': ranking
+        'ranking': sorted(ranking, key=lambda r: r.get('r2', -999), reverse=True)
     }
 
 def grafico_regressao_limpo(x, y, ajuste, titulo='Ajuste de regressão'):
