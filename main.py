@@ -168,6 +168,96 @@ def ajustar_modelo_regressao(x, y, modelo_regr='quadratica'):
         'x_otimo': x_otimo, 'y_otimo': y_otimo
     }
 
+
+
+def _safe_float(valor, fallback=None):
+    try:
+        v = float(valor)
+        return v if np.isfinite(v) else fallback
+    except Exception:
+        return fallback
+
+def _modelo_legivel(modelo):
+    return {
+        'linear': 'Linear',
+        'quadratica': 'Quadrática',
+        'cubica': 'Cúbica',
+        'exponencial': 'Exponencial',
+        'logaritmica': 'Logarítmica'
+    }.get(str(modelo or '').lower(), str(modelo or 'Modelo'))
+
+def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
+    """Compara modelos disponíveis e recomenda o ajuste com melhor equilíbrio entre R² e parcimônia.
+    Usa R² ajustado quando possível; quando há poucos pontos, aplica pequena penalização por complexidade.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    mask = np.isfinite(x) & np.isfinite(y)
+    x, y = x[mask], y[mask]
+    n = len(x)
+    if n < 2:
+        return None
+    modelos = ['linear', 'quadratica', 'cubica', 'exponencial', 'logaritmica']
+    params = {'linear': 2, 'quadratica': 3, 'cubica': 4, 'exponencial': 2, 'logaritmica': 2}
+    ranking = []
+    for m in modelos:
+        try:
+            ajuste = ajustar_modelo_regressao(x, y, m)
+            r2 = float(ajuste.get('r2', np.nan))
+            k = params[m]
+            # Exige pelo menos 2 graus de liberdade residuais para não premiar sobreajuste.
+            if n > k + 1:
+                r2_adj = 1 - (1 - r2) * (n - 1) / (n - k)
+            else:
+                # Quando há pontos demais próximos ao número de parâmetros, o R² pode ficar artificialmente alto.
+                r2_adj = r2 - (0.12 * max(1, k - 1))
+            ranking.append({
+                'modelo': ajuste.get('modelo', _modelo_legivel(m)),
+                'modelo_id': m,
+                'r2': round(r2, 4),
+                'r2_ajustado': round(float(r2_adj), 4),
+                'equacao': ajuste.get('equacao', '')
+            })
+        except Exception as exc:
+            ranking.append({
+                'modelo': _modelo_legivel(m),
+                'modelo_id': m,
+                'erro': str(exc)
+            })
+    validos = [r for r in ranking if 'r2_ajustado' in r and np.isfinite(r['r2_ajustado'])]
+    if not validos:
+        return {'mensagem': 'Não foi possível comparar modelos alternativos com os dados informados.', 'ranking': ranking}
+    melhor = max(validos, key=lambda r: (r['r2_ajustado'], r['r2']))
+    atual_id = str(modelo_atual or 'quadratica').lower()
+    if atual_id in ['quadrática']: atual_id = 'quadratica'
+    if atual_id in ['cúbica']: atual_id = 'cubica'
+    if atual_id in ['logarítmica', 'log']: atual_id = 'logaritmica'
+    atual = next((r for r in validos if r.get('modelo_id') == atual_id), None)
+    if atual is None:
+        atual = validos[0]
+    diferenca = melhor['r2_ajustado'] - atual['r2_ajustado']
+    if melhor['modelo_id'] != atual.get('modelo_id') and (diferenca >= 0.03 or atual.get('r2', 0) < 0.75):
+        mensagem = (f"O modelo selecionado ({atual['modelo']}) não foi o mais eficiente para estes dados. "
+                    f"Recomenda-se avaliar o modelo {melhor['modelo']}, que apresentou melhor equilíbrio entre R² "
+                    f"({melhor['r2']:.4f}) e complexidade do ajuste.")
+    elif atual.get('r2', 0) >= 0.90:
+        mensagem = (f"O modelo selecionado ({atual['modelo']}) apresenta excelente aderência aos dados "
+                    f"(R² = {atual['r2']:.4f}) e pode ser mantido, desde que faça sentido biologicamente.")
+    elif atual.get('r2', 0) >= 0.75:
+        mensagem = (f"O modelo selecionado ({atual['modelo']}) apresenta boa aderência aos dados "
+                    f"(R² = {atual['r2']:.4f}). Ainda assim, compare a interpretação biológica com o modelo {melhor['modelo']}.")
+    else:
+        mensagem = (f"O modelo selecionado ({atual['modelo']}) apresenta baixa aderência aos dados "
+                    f"(R² = {atual['r2']:.4f}). Recomenda-se testar o modelo {melhor['modelo']} ou revisar as doses avaliadas.")
+    return {
+        'modelo_atual': atual.get('modelo'),
+        'r2_atual': f"{atual.get('r2', np.nan):.4f}",
+        'melhor_modelo': melhor.get('modelo'),
+        'r2_melhor': f"{melhor.get('r2', np.nan):.4f}",
+        'mensagem': mensagem,
+        'ranking': ranking
+    }
+
 def grafico_regressao_limpo(x, y, ajuste, titulo='Ajuste de regressão'):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -311,7 +401,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             fig.savefig(b_svg, format="svg", bbox_inches='tight')
             plt.close(fig)
             
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -427,7 +517,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             fig.savefig(b_svg, format="svg", bbox_inches='tight')
             plt.close(fig)
             
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -556,7 +646,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
             fig.savefig(b_svg, format="svg", bbox_inches='tight')
             plt.close(fig)
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -715,6 +805,7 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
         "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'),
         "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'),
         "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'),
+        "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo),
         "pontos": [{"Dose": round(float(a), 4), "Produtividade": round(float(b), 4), "Estimado": round(float(c), 4)} for a, b, c in zip(x, y, y_pred)]
     }
 
