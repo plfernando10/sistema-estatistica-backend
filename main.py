@@ -7,11 +7,89 @@ from statsmodels.stats.libqsturng import qsturng
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import io
+import re
 import base64
+import urllib.request
 
 app = FastAPI(title="Solver Estatística Experimental API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# ================= IDENTIDADE VISUAL SOLVER (paleta + tipografia dos gráficos) =================
+SOLVER_AGRO_500 = '#3d8e56'
+SOLVER_AGRO_700 = '#265b39'
+SOLVER_AGRO_900 = '#1b3c28'
+SOLVER_AGRO_950 = '#0e2116'
+SOLVER_EARTH_500 = '#b18356'
+SOLVER_GRID = '#e7eee9'
+SOLVER_AXIS = '#c8d6cd'
+SOLVER_TEXT = '#1b3c28'
+SOLVER_TEXT_SOFT = '#5a6b62'
+SOLVER_BG = '#fdfdfb'
+SOLVER_BG_PLOT = '#fbfdfa'
+
+_SOLVER_FONT_CACHE = {}
+
+
+def _preparar_fonte_solver():
+    """Baixa Plus Jakarta Sans do Google Fonts e registra no matplotlib.
+    Roda uma vez no boot da API. Se a rede falhar, cai em silêncio para
+    uma fonte sans-serif padrão — nunca quebra a geração do gráfico."""
+    pesos = {'regular': 500, 'bold': 700}
+    for chave, peso in pesos.items():
+        if chave in _SOLVER_FONT_CACHE:
+            continue
+        try:
+            css_url = f"https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@{peso}&display=swap"
+            req = urllib.request.Request(css_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                css_text = resp.read().decode('utf-8')
+            match = re.search(r"url\((https://fonts\.gstatic\.com/[^)]+\.ttf)\)", css_text)
+            if not match:
+                raise RuntimeError('URL da fonte não encontrada na resposta do Google Fonts.')
+            ttf_url = match.group(1)
+            with urllib.request.urlopen(ttf_url, timeout=4) as resp:
+                font_bytes = resp.read()
+            caminho = f"/tmp/PlusJakartaSans-{peso}.ttf"
+            with open(caminho, 'wb') as f:
+                f.write(font_bytes)
+            fm.fontManager.addfont(caminho)
+            nome_familia = fm.FontProperties(fname=caminho).get_name()
+            _SOLVER_FONT_CACHE[chave] = nome_familia
+        except Exception:
+            _SOLVER_FONT_CACHE[chave] = 'DejaVu Sans'
+
+    matplotlib.rcParams['font.family'] = _SOLVER_FONT_CACHE.get('regular', 'DejaVu Sans')
+    matplotlib.rcParams['axes.unicode_minus'] = False
+
+
+def _fonte_bold():
+    return _SOLVER_FONT_CACHE.get('bold', 'DejaVu Sans')
+
+
+def _fonte_regular():
+    return _SOLVER_FONT_CACHE.get('regular', 'DejaVu Sans')
+
+
+def _estilizar_eixos_solver(ax, fig):
+    """Aplica o tratamento visual padrão Solver a um eixo matplotlib."""
+    fig.patch.set_facecolor(SOLVER_BG)
+    ax.set_facecolor(SOLVER_BG_PLOT)
+    ax.grid(True, color=SOLVER_GRID, linewidth=1.1, zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color(SOLVER_AXIS)
+    ax.spines['bottom'].set_color(SOLVER_AXIS)
+    ax.spines['left'].set_linewidth(1.1)
+    ax.spines['bottom'].set_linewidth(1.1)
+    ax.tick_params(colors=SOLVER_TEXT_SOFT, labelsize=10.5, length=0)
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontfamily(_fonte_regular())
+
+
+_preparar_fonte_solver()
 
 # ================= VALIDAÇÃO DE ESTRUTURA DOS ARQUIVOS (v10) =================
 def _normalizar_nome_coluna(col):
@@ -206,7 +284,6 @@ def _r2_ajuste(y, y_pred):
     return 1 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
 
 def _equacao_polinomial(coef_desc):
-    # coef_desc vem do np.polyfit: [b_grau, ..., b1, b0]
     grau = len(coef_desc) - 1
     termos = [f"y = {coef_desc[-1]:.4f}"]
     for pot in range(1, grau + 1):
@@ -251,7 +328,6 @@ def ajustar_modelo_regressao(x, y, modelo_regr='quadratica'):
         p = np.poly1d(coef)
         y_pred = p(x); y_plot = p(x_plot)
         eq = _equacao_polinomial(coef); gl_reg = 3; nome = 'Cúbica'
-        # Ótimo técnico: maior ponto estacionário dentro do intervalo; se não houver, maior valor previsto no intervalo.
         deriv = np.polyder(p)
         candidatos = []
         for r in np.roots(deriv):
@@ -309,15 +385,6 @@ def _modelo_legivel(modelo):
     }.get(str(modelo or '').lower(), str(modelo or 'Modelo'))
 
 def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
-    """Compara os modelos de regressão e sempre informa o melhor ajuste encontrado.
-
-    Critério usado:
-    1) `melhor_modelo`: maior R² observado entre os modelos válidos.
-    2) `modelo_parcimonioso`: maior R² ajustado, usado como apoio para evitar sobreajuste.
-
-    No relatório, a recomendação prioriza o melhor R² quando ele supera o modelo escolhido,
-    mas alerta o usuário para validar o sentido biológico da curva, especialmente em cúbicas.
-    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     mask = np.isfinite(x) & np.isfinite(y)
@@ -338,7 +405,6 @@ def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
             if n > k + 1:
                 r2_adj = 1 - (1 - r2) * (n - 1) / max(1, (n - k))
             else:
-                # Penalização informativa para modelos mais complexos quando há poucos pontos.
                 r2_adj = r2 - (0.04 * max(1, k - 1))
             ranking.append({
                 'modelo': ajuste.get('modelo', _modelo_legivel(m)),
@@ -413,23 +479,47 @@ def calcular_recomendacao_modelo(x, y, modelo_atual='quadratica'):
 def grafico_regressao_limpo(x, y, ajuste, titulo='Ajuste de regressão'):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    fig, ax = plt.subplots(figsize=(9.2, 5.4))
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('#fbfdfb')
-    ax.plot(ajuste['x_plot'], ajuste['y_plot'], color='#2d7244', linewidth=3.2, label='Curva ajustada', zorder=3)
-    ax.scatter(x, y, s=70, color='#0f172a', edgecolor='white', linewidth=1.4, label='Dados observados', zorder=4)
+
+    fig, ax = plt.subplots(figsize=(9.2, 5.4), dpi=160)
+    _estilizar_eixos_solver(ax, fig)
+
+    ax.plot(
+        ajuste['x_plot'], ajuste['y_plot'],
+        color=SOLVER_AGRO_500, linewidth=3.2, solid_capstyle='round',
+        label='Curva ajustada', zorder=3
+    )
+    ax.scatter(
+        x, y, s=72, color=SOLVER_AGRO_950, edgecolor='white', linewidth=1.5,
+        label='Dados observados', zorder=4
+    )
+
     if ajuste.get('x_otimo') is not None and ajuste.get('y_otimo') is not None:
         xo, yo = ajuste['x_otimo'], ajuste['y_otimo']
-        ax.axvline(x=xo, color='#94a3b8', linestyle=(0, (4, 4)), linewidth=1.4, zorder=2)
-        ax.scatter([xo], [yo], color='#b18356', marker='*', s=210, edgecolor='white', linewidth=1.2, zorder=5)
-        ax.annotate(f"Dose ótima: {xo:.2f}\nProd. ótima: {yo:.2f}", xy=(xo, yo), xytext=(12, 12), textcoords='offset points', fontsize=10, fontweight='bold', color='#1b3c28', bbox=dict(boxstyle='round,pad=0.35', fc='white', ec='#bbe1c6', alpha=0.95), arrowprops=dict(arrowstyle='->', color='#2d7244', lw=1.2))
-    ax.set_title(titulo, fontsize=15, fontweight='bold', color='#0f172a', pad=12)
-    ax.set_xlabel('Dose', fontsize=11, fontweight='bold', color='#334155')
-    ax.set_ylabel('Produtividade', fontsize=11, fontweight='bold', color='#334155')
-    ax.grid(True, color='#e2e8f0', linewidth=1)
-    ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#cbd5e1'); ax.spines['bottom'].set_color('#cbd5e1')
-    ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0')
+        ax.axvline(x=xo, color=SOLVER_AXIS, linestyle=(0, (4, 4)), linewidth=1.4, zorder=2)
+        ax.scatter(
+            [xo], [yo], color=SOLVER_EARTH_500, marker='*', s=230,
+            edgecolor='white', linewidth=1.2, zorder=5
+        )
+        ax.annotate(
+            f"Dose ótima: {xo:.2f}\nProd. ótima: {yo:.2f}",
+            xy=(xo, yo), xytext=(14, 14), textcoords='offset points',
+            fontsize=10.5, fontfamily=_fonte_bold(), color=SOLVER_AGRO_900,
+            bbox=dict(boxstyle='round,pad=0.4', fc='white', ec='#cfe6d6', lw=1.1, alpha=0.97),
+            arrowprops=dict(arrowstyle='->', color=SOLVER_AGRO_500, lw=1.3)
+        )
+
+    ax.set_title(titulo, fontsize=15.5, fontfamily=_fonte_bold(), color=SOLVER_AGRO_950, pad=14)
+    ax.set_xlabel('Dose', fontsize=11.5, fontfamily=_fonte_bold(), color=SOLVER_TEXT)
+    ax.set_ylabel('Produtividade', fontsize=11.5, fontfamily=_fonte_bold(), color=SOLVER_TEXT)
+
+    legenda = ax.legend(
+        loc='upper left', frameon=True, facecolor='white', edgecolor='#e3ece5',
+        framealpha=0.96, fontsize=10
+    )
+    for text in legenda.get_texts():
+        text.set_fontfamily(_fonte_regular())
+        text.set_color(SOLVER_TEXT)
+
     fig.tight_layout()
     return fig
 
@@ -837,13 +927,12 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
 def _parse_lista_numerica(texto: str):
     if not texto:
         return []
-    import re
+    import re as _re
     texto = texto.strip()
-    # Preferimos separar por linha, ponto e vírgula ou tabulação para preservar decimal com vírgula (ex.: 16,3).
-    if re.search(r'[;\n\r\t]', texto):
-        partes = [x for x in re.split(r'[;\n\r\t]+', texto) if x.strip()]
+    if _re.search(r'[;\n\r\t]', texto):
+        partes = [x for x in _re.split(r'[;\n\r\t]+', texto) if x.strip()]
     else:
-        partes = [x for x in re.split(r'\s+', texto) if x.strip()]
+        partes = [x for x in _re.split(r'\s+', texto) if x.strip()]
     return [float(x.strip().replace(',', '.')) for x in partes]
 
 def _modelo_nome(modelo_regr: str):
@@ -919,17 +1008,21 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
     x_plot = np.linspace(x_min, x_max, 500)
     y_plot = np.asarray(pred_func(x_plot), dtype=float)
 
-    # Dose ótima: máximo estimado dentro do intervalo observado, válido também para cúbica,
-    # exponencial e logarítmica. Para modelos monotônicos, o ótimo será uma das extremidades.
     idx_otimo = int(np.nanargmax(y_plot))
     x_otimo = float(x_plot[idx_otimo])
     y_otimo = float(y_plot[idx_otimo])
 
-    fig, ax = plt.subplots(figsize=(9.2, 5.4), dpi=150)
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('#fbfdfb')
-    ax.plot(x_plot, y_plot, color='#2d7244', linewidth=3.0, solid_capstyle='round', label='Curva ajustada', zorder=3)
-    ax.scatter(x, y, s=78, color='#0f172a', edgecolor='white', linewidth=1.5, label='Dados observados', zorder=4)
+    fig, ax = plt.subplots(figsize=(9.2, 5.4), dpi=160)
+    _estilizar_eixos_solver(ax, fig)
+
+    ax.plot(
+        x_plot, y_plot, color=SOLVER_AGRO_500, linewidth=3.0,
+        solid_capstyle='round', label='Curva ajustada', zorder=3
+    )
+    ax.scatter(
+        x, y, s=78, color=SOLVER_AGRO_950, edgecolor='white', linewidth=1.5,
+        label='Dados observados', zorder=4
+    )
 
     y_all = np.r_[y, y_plot, y_otimo]
     y_min, y_max = float(np.nanmin(y_all)), float(np.nanmax(y_all))
@@ -937,24 +1030,30 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
     ax.set_xlim(x_min - dx * 0.05, x_max + dx * 0.05)
     ax.set_ylim(y_min - dy * 0.16, y_max + dy * 0.18)
 
-    ax.axvline(x=x_otimo, color='#94a3b8', linestyle=(0, (4, 4)), linewidth=1.4, zorder=1)
-    ax.scatter(x_otimo, y_otimo, color='#b18356', marker='*', s=260, edgecolor='white', linewidth=1.1, zorder=5)
+    ax.axvline(x=x_otimo, color=SOLVER_AXIS, linestyle=(0, (4, 4)), linewidth=1.4, zorder=1)
+    ax.scatter(
+        x_otimo, y_otimo, color=SOLVER_EARTH_500, marker='*', s=260,
+        edgecolor='white', linewidth=1.1, zorder=5
+    )
     ax.annotate(
         f"Dose ótima: {_fmt2(x_otimo)}\nProd. ótima: {_fmt2(y_otimo)}",
         xy=(x_otimo, y_otimo), xytext=(14, 18), textcoords='offset points',
-        fontsize=10.5, fontweight='bold', color='#1b3c28',
-        bbox=dict(boxstyle='round,pad=0.45', fc='white', ec='#dcf1e1', lw=1.2, alpha=0.96),
-        arrowprops=dict(arrowstyle='->', color='#2d7244', lw=1.2), zorder=6
+        fontsize=10.5, fontfamily=_fonte_bold(), color=SOLVER_AGRO_900,
+        bbox=dict(boxstyle='round,pad=0.45', fc='white', ec='#cfe6d6', lw=1.2, alpha=0.97),
+        arrowprops=dict(arrowstyle='->', color=SOLVER_AGRO_500, lw=1.2), zorder=6
     )
-    ax.set_title('Regressão direta para dose ótima', fontsize=15, fontweight='bold', color='#0f172a', pad=14)
-    ax.set_xlabel('Dose', fontsize=11.5, fontweight='bold', color='#334155')
-    ax.set_ylabel('Produtividade', fontsize=11.5, fontweight='bold', color='#334155')
-    ax.grid(True, which='major', color='#e2e8f0', linewidth=1, linestyle='-')
-    ax.set_axisbelow(True)
-    ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#cbd5e1'); ax.spines['bottom'].set_color('#cbd5e1')
-    ax.tick_params(colors='#475569', labelsize=10)
-    ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#e2e8f0', framealpha=0.96, fontsize=10)
+    ax.set_title('Regressão direta para dose ótima', fontsize=15.5, fontfamily=_fonte_bold(), color=SOLVER_AGRO_950, pad=14)
+    ax.set_xlabel('Dose', fontsize=11.5, fontfamily=_fonte_bold(), color=SOLVER_TEXT)
+    ax.set_ylabel('Produtividade', fontsize=11.5, fontfamily=_fonte_bold(), color=SOLVER_TEXT)
+
+    legenda = ax.legend(
+        loc='upper left', frameon=True, facecolor='white', edgecolor='#e3ece5',
+        framealpha=0.96, fontsize=10
+    )
+    for text in legenda.get_texts():
+        text.set_fontfamily(_fonte_regular())
+        text.set_color(SOLVER_TEXT)
+
     fig.tight_layout()
 
     b_png, b_pdf, b_svg = io.BytesIO(), io.BytesIO(), io.BytesIO()
