@@ -524,6 +524,25 @@ def grafico_regressao_limpo(x, y, ajuste, titulo='Ajuste de regressão'):
     return fig
 
 
+def montar_dados_grafico(x, y, ajuste, titulo='Ajuste de regressão'):
+    """Empacota os pontos da curva e dos dados observados para o front
+    desenhar o gráfico com Chart.js (visual moderno, interativo)."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    x_plot = np.asarray(ajuste.get('x_plot', []), dtype=float)
+    y_plot = np.asarray(ajuste.get('y_plot', []), dtype=float)
+    dados = {
+        'titulo': titulo,
+        'observados': [{'x': round(float(a), 4), 'y': round(float(b), 4)} for a, b in zip(x, y)],
+        'curva': [{'x': round(float(a), 4), 'y': round(float(b), 4)} for a, b in zip(x_plot, y_plot)],
+        'eixo_x': 'Dose',
+        'eixo_y': 'Produtividade'
+    }
+    if ajuste.get('x_otimo') is not None and ajuste.get('y_otimo') is not None:
+        dados['otimo'] = {'x': round(float(ajuste['x_otimo']), 4), 'y': round(float(ajuste['y_otimo']), 4)}
+    return dados
+
+
 # ================= MÓDULO 1: SIMPLES (DIC/DBC/DQL) =================
 @app.post("/api/analise/simples")
 async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str = Form("dbc"), tipo_teste: str = Form("anova"), modelo_regr: str = Form("linear"), testemunha: str = Form("")):
@@ -641,7 +660,7 @@ async def analisar_simples(file: UploadFile = File(...), tipo_delineamento: str 
             fig.savefig(b_svg, format="svg", bbox_inches='tight')
             plt.close(fig)
             
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "dados_grafico": montar_dados_grafico(x, y, ajuste, "Ajuste de regressão"), "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -767,7 +786,7 @@ async def analisar_fatorial(file: UploadFile = File(...), tipo_teste: str = Form
             fig.savefig(b_svg, format="svg", bbox_inches='tight')
             plt.close(fig)
             
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "dados_grafico": montar_dados_grafico(x, y, ajuste, "Ajuste de regressão"), "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -899,7 +918,7 @@ async def analisar_parcelas(file: UploadFile = File(...), tipo_teste: str = Form
             fig.savefig(b_pdf, format="pdf", bbox_inches='tight')
             fig.savefig(b_svg, format="svg", bbox_inches='tight')
             plt.close(fig)
-            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
+            res_dict = {"status": "sucesso", "tipo": "regressao", "equacao": eq, "r2": f"{r2:.4f}", "modelo": ajuste['modelo'], "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'), "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'), "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'), "anova_reg": anova_reg, "dados_grafico": montar_dados_grafico(x, y, ajuste, "Ajuste de regressão"), "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo_regr)}
             if x_otimo is not None: res_dict.update({"dose_otima": f"{x_otimo:.2f}", "resposta_otima": f"{y_otimo:.2f}"})
             return res_dict
 
@@ -1069,6 +1088,13 @@ def _ajustar_regressao_direta(x, y, modelo_regr="quadratica"):
         "img_png": base64.b64encode(b_png.getvalue()).decode('utf-8'),
         "img_pdf": base64.b64encode(b_pdf.getvalue()).decode('utf-8'),
         "img_svg": base64.b64encode(b_svg.getvalue()).decode('utf-8'),
+        "dados_grafico": {
+            "titulo": "Regressão direta para dose ótima",
+            "eixo_x": "Dose", "eixo_y": "Produtividade",
+            "observados": [{"x": round(float(a), 4), "y": round(float(b), 4)} for a, b in zip(x, y)],
+            "curva": [{"x": round(float(a), 4), "y": round(float(b), 4)} for a, b in zip(x_plot, y_plot)],
+            "otimo": {"x": round(float(x_otimo), 4), "y": round(float(y_otimo), 4)}
+        },
         "recomendacao_modelo": calcular_recomendacao_modelo(x, y, modelo),
         "pontos": [{"Dose": round(float(a), 4), "Produtividade": round(float(b), 4), "Estimado": round(float(c), 4)} for a, b, c in zip(x, y, y_pred)]
     }
